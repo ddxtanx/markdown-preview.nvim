@@ -2,7 +2,9 @@
 -- Verify the harness every other suite leans on: the root it resolves and
 -- the XDG move (Section 1), the bounded curl (2), the exit code a gate reads
 -- (3), an error a callback raises failing the suite (4), H.expect_error (5),
--- H.rtp's proof of the copy require loads (6) and one spelling per path (7).
+-- H.rtp's proof of the copy require loads (6), one spelling per path (7)
+-- and the teardown, the raw client, the response reader and the counters
+-- (8).
 --
 -- Run: nvim --headless -u NONE -l "$PWD/tests/helpers_test.lua"
 
@@ -1205,6 +1207,68 @@ ok(
 	order_out:find("first\n  PASS: x\nouter\n", 1, true) ~= nil,
 	"an H.case runs only its own cleanups, the suite's cleanups wait for H.finish"
 )
+-- H.finish empties the list once and rules, so a cleanup registered from
+-- its drain on, by a cleanup or by a callback the drain runs, would never
+-- run; a case's drain is followed by more of the suite, so there it runs.
+eq(
+	child_exit(
+		[[
+H.defer(function() H.defer(function() end) end)
+H.ok(true, "x")
+H.finish()]],
+		"H%.defer during a cleanup drain"
+	),
+	1,
+	"a cleanup that registers a cleanup at H.finish time fails the suite"
+)
+eq(
+	child_exit(
+		[[
+H.ok(true, "x")
+vim.schedule(function() H.defer(function() end) end)
+H.finish()]],
+		"H%.defer during a cleanup drain"
+	),
+	1,
+	"a callback that registers a cleanup during H.finish's drain fails the suite"
+)
+eq(
+	child_exit(
+		[[
+H.case("nested", function()
+    H.defer(function() H.defer(function() io.stdout:write("nested ran\n") end) end)
+end)
+H.ok(true, "x")
+H.finish()]],
+		"nested ran\n.*Results: 1 passed, 0 failed"
+	),
+	0,
+	"a cleanup that registers a cleanup at a case's end runs it"
+)
+eq(
+	child_exit(
+		[[
+H.defer(function() vim.cmd("cquit 3") end)
+H.ok(true, "x")
+H.finish()]],
+		"inside H%.finish%(%)'s drain"
+	),
+	1,
+	"a quit from a cleanup at H.finish time is named as the drain's"
+)
+-- The refusal comes before uv.new_tcp, so a client refused here was never
+-- made: the child cannot count its handles after the ruling, and needs not.
+eq(
+	child_exit(
+		[[
+H.defer(function() H.raw_connect(1) end)
+H.ok(true, "x")
+H.finish()]],
+		"H%.raw_connect during a cleanup drain"
+	),
+	1,
+	"an H.raw_connect from a cleanup at H.finish time fails the suite"
+)
 
 -- A peer that keeps every byte it reads and notes the client's FIN or
 -- reset: it shows what the raw client put on the wire. It answers at the
@@ -1253,13 +1317,78 @@ local function recorder(reply)
 	return assert(srv:getsockname()).port, rec
 end
 
+-- A peer that accepts, never reads, and resets the connection when the row
+-- calls the reset it returns with the port: a reset at the accept raced the
+-- client's connect callback, which then read ECONNRESET (measured, one run
+-- in three), and a row calls it once H.raw_connect has returned. The accept
+-- runs on the same loop before the row goes on, and reset waits for it
+-- should it not have. on_bytes resets at the first bytes instead, for
+-- H.raw_request, which gives a row no turn between its connect and its read.
+local function resetter(on_bytes)
+	local srv = assert(uv.new_tcp())
+	assert(srv:bind("127.0.0.1", 0))
+	local c
+	local function reset()
+		assert(
+			H.wait_for(function()
+				return c ~= nil
+			end, 2000),
+			"the peer never accepted"
+		)
+		if not c:is_closing() then
+			assert(c:close_reset())
+		end
+	end
+	assert(srv:listen(8, function()
+		c = assert(uv.new_tcp())
+		assert(srv:accept(c))
+		H.defer(function()
+			if not c:is_closing() then
+				c:close()
+			end
+		end)
+		if on_bytes then
+			assert(c:read_start(function(_, data)
+				if data and not c:is_closing() then
+					assert(c:close_reset())
+				end
+			end))
+		end
+	end))
+	H.defer(function()
+		if not srv:is_closing() then
+			srv:close()
+		end
+	end)
+	return assert(srv:getsockname()).port, reset
+end
+
 H.case("the raw client", function()
+	ok(not pcall(H.raw_connect, 65536), "an out-of-range port raises rather than connecting elsewhere")
+	local tcps_before = H.handle_count("tcp")
+	ok(not pcall(H.raw_connect, 1, "localhost"), "a host name raises before any handle exists")
+	eq(H.handle_count("tcp"), tcps_before, "and leaves no handle")
+	ok(
+		blames_caller(function()
+			H.raw_connect(1, "localhost")
+		end, "H%.raw_connect: host must be an IP literal"),
+		"the host name's refusal names the suite's line"
+	)
+	eq(
+		child_exit('H.ok(true, "x")\nH.finish()\nH.raw_connect(1)', "H%.raw_connect after H%.finish%(%)"),
+		1,
+		"an H.raw_connect after H.finish() exits 1"
+	)
+
 	local gone = assert(uv.new_tcp())
 	assert(gone:bind("127.0.0.1", 0))
 	local gone_port = assert(gone:getsockname()).port
 	gone:close()
 	local nobody, nobody_err = H.raw_connect(gone_port)
-	ok(nobody == nil and nobody_err ~= nil, "a refused port yields no client and an error: " .. tostring(nobody_err))
+	ok(
+		nobody == nil and type(nobody_err) == "string" and nobody_err:find("ECONNREFUSED", 1, true) ~= nil,
+		"a refused port yields no client and ECONNREFUSED: " .. tostring(nobody_err)
+	)
 
 	local rport, rec = recorder(nil)
 	local rc = assert(H.raw_connect(rport))
@@ -1301,6 +1430,8 @@ H.case("the raw client", function()
 	vim.wait(100)
 	local reset, reset_err = rc:abort()
 	ok(reset == true, "abort reports the reset it sent: " .. tostring(reset_err))
+	local again, again_err = rc:abort()
+	ok(again == nil and again_err == "already closing", "a second abort reports that nothing was sent")
 	vim.wait(2000, function()
 		return rec.ended ~= nil
 	end, 5)
@@ -1314,13 +1445,53 @@ H.case("the raw client", function()
 	ok((uv.hrtime() - t0) / 1e6 < 2000, "within the read bound")
 	ok((uv.hrtime() - t0) / 1e6 >= 250, "and not before the bound")
 	rc:close()
+
+	rport = recorder(nil)
+	rc = assert(H.raw_connect(rport))
+	t0 = uv.hrtime()
+	rc:read(2000, function()
+		return true
+	end)
+	ok((uv.hrtime() - t0) / 1e6 < 500, "a stop_when that holds ends the read before its bound")
+	rc:close()
+
+	local sink_port, sink_reset = resetter()
+	rc = assert(H.raw_connect(sink_port))
+	sink_reset()
+	local sent, send_err = rc:send(("x"):rep(64 * 1024 * 1024))
+	ok(
+		sent == nil and type(send_err) == "string",
+		"a send the peer resets returns nil and the error: " .. tostring(send_err)
+	)
+	rc:close()
+
+	local psrv, pport = peer("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
+	H.defer(function()
+		if not psrv:is_closing() then
+			psrv:close()
+		end
+	end)
+	local answer, answer_eof, answer_err = H.raw_request(pport, "GET / HTTP/1.1\r\n\r\n")
+	eq(answer, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi", "H.raw_request reads the reply")
+	ok(
+		answer_eof == true and answer_err == nil,
+		"and returns the end and no error after a FIN: " .. tostring(answer_err)
+	)
+
+	local cut_port, cut_reset = resetter()
+	rc = assert(H.raw_connect(cut_port))
+	cut_reset()
+	local _, cut_eof = rc:read(2000)
+	ok(cut_eof == true and rc.err == "ECONNRESET", "a reset reads as the end with ECONNRESET: " .. tostring(rc.err))
+	rc:close()
+	local _, _, cut_err = H.raw_request((resetter(true)), "GET / HTTP/1.1\r\n\r\n")
+	eq(cut_err, "ECONNRESET", "H.raw_request returns the reset as its third value")
 end)
 
 H.case("the response reader", function()
-	local two = H.responses(
-		"HTTP/1.1 401 Unauthorized\r\nContent-Length: 3\r\nX-A: 1\r\nx-a: 2\r\n\r\nabc"
-			.. "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\nretry: 1000\n\n"
-	)
+	local two_bytes = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 3\r\nX-A: 1\r\nx-a: 2\r\n\r\nabc"
+		.. "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\nretry: 1000\n\n"
+	local two = H.responses(two_bytes)
 	eq(#two, 2, "two responses back to back parse as two")
 	eq(two[1] and two[1].reason, "Unauthorized", "the reason phrase is read")
 	eq(two[1] and two[1].body, "abc", "a body runs for its Content-Length")
@@ -1344,13 +1515,43 @@ H.case("the response reader", function()
 	)
 	eq(#H.responses("HTTP/1.0 200 OK\r\nContent-Length: 0\r\n\r\n"), 0, "an HTTP/1.0 status line is no response")
 	eq(#H.responses("HTTP/1.1 2000 OK\r\nContent-Length: 0\r\n\r\n"), 0, "a four-digit status is no response")
+	eq(#H.responses("HTTP/1.1 200OK\r\nContent-Length: 0\r\n\r\n"), 0, "no space before the reason is no response")
+	eq(two[1] and two[1].complete, true, "a full body is complete")
+	eq(
+		#H.responses("HTTP/1.1 200 OK\r\nNoColon\r\nContent-Length: 0\r\n\r\n"),
+		0,
+		"a header line without a colon stops the split"
+	)
+	eq(
+		#H.responses("HTTP/1.1 200 OK\r\nX-A: 1\nX-B: 2\r\nContent-Length: 0\r\n\r\n"),
+		0,
+		"a bare LF inside the head stops the split"
+	)
+	eq(
+		#H.responses("HTTP/1.1 204 No Content\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"),
+		2,
+		"a 204 has no body, so the next response parses"
+	)
+	local one, rest = H.responses("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhiHTTP/1.0 200 OK\r\n\r\n")
+	eq(#one, 1, "the response before one that does not parse is returned")
+	eq(rest, "HTTP/1.0 200 OK\r\n\r\n", "the unparsed tail is returned")
+	eq(H.response(two_bytes).status, 401, "H.response is the first response of the bytes")
+	ok(not pcall(H.response, "HTTP/1.0 200 OK\r\n\r\n"), "no response parsed is a raise, never an empty table")
+	eq(
+		H.response("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc").complete,
+		false,
+		"a short body is marked incomplete"
+	)
+	eq(H.response("HTTP/1.1 204\r\n\r\n").reason, "", "a status line with no reason parses with an empty reason")
 end)
 
 H.case("the counters", function()
-	-- A handle's release is asynchronous and a peer's close runs in a later
-	-- callback, so a count settles through H.wait_for before it is compared.
+	-- A peer's close runs in a later callback, so a descriptor count settles
+	-- through H.wait_for before it is compared; a handle is closing at once.
 	local fds = H.fd_count()
 	if fds then
+		ok(type(fds) == "number", "off Windows the listing exists and counts")
+		ok(not pcall(H.fd_count, vim.fs.joinpath(H.tmpdir(), "no-such-listing")), "a listing that fails raises")
 		local probe_file = vim.fs.joinpath(H.tmpdir(), "fd-probe")
 		H.write_file(probe_file, "x")
 		local fd = assert(uv.fs_open(probe_file, "r", 438))
@@ -1367,10 +1568,49 @@ H.case("the counters", function()
 		H.skip("and its close gives it back (no descriptor listing on this platform)")
 	end
 	local tcps = H.handle_count("tcp")
+	local timers_before = H.handle_count("timer")
 	local extra = uv.new_tcp()
 	eq(H.handle_count("tcp"), tcps + 1, "an open TCP handle is counted")
+	eq(H.handle_count("timer"), timers_before, "a tcp is not counted as a timer")
 	extra:close()
 	eq(H.handle_count("tcp"), tcps, "a closing one is not")
+	local events = H.handle_count("fs_event")
+	local w = assert(uv.new_fs_event())
+	eq(H.handle_count("fs_event"), events + 1, "an open fs_event handle is counted")
+	w:close()
+	eq(H.handle_count("fs_event"), events, "and a closing one is not")
+	ok(not pcall(H.handle_count, "tcpp"), "an unknown kind raises rather than counting zero")
+	-- The client the case never closes is the one raw_connect defers, so a
+	-- row that forgets it leaves no socket for the next case to count.
+	eq(
+		child_exit(
+			[[
+local uv = vim.uv
+local before = H.handle_count("tcp")
+H.case("a client left open", function()
+    local srv = assert(uv.new_tcp())
+    assert(srv:bind("127.0.0.1", 0))
+    assert(srv:listen(8, function() end))
+    H.defer(function() srv:close() end)
+    H.ok(H.raw_connect(assert(srv:getsockname()).port) ~= nil, "the client connects")
+end)
+H.eq(H.handle_count("tcp"), before, "the case's end closed the client")
+H.finish()]],
+			"Results: 2 passed"
+		),
+		0,
+		"H.raw_connect's client closes when its case ends"
+	)
+	-- A suite that never counts still sheds its closed handles as it makes
+	-- new ones.
+	for _ = 1, 200 do
+		assert(uv.new_tcp()):close()
+	end
+	vim.wait(10)
+	for _ = 1, 64 do
+		assert(uv.new_tcp()):close()
+	end
+	ok(H._registry_size() < 200, "the registry prunes closed handles as it grows: " .. H._registry_size())
 	ok(
 		H.wait_for(function()
 			return true

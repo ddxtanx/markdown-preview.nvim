@@ -1,7 +1,9 @@
 -- tests/helpers.lua
 -- Shared by every headless suite: XDG isolation for everything a suite
--- creates, one spelling per path, a bounded curl and one pass/fail ledger
--- whose exit code is the ruling. Loaded by path (dofile), never by require,
+-- creates, one spelling per path, a bounded curl, one pass/fail ledger
+-- whose exit code is the ruling, a teardown that runs whatever a suite
+-- registers, a raw TCP client, a reader of raw responses and counters of
+-- descriptors and live handles. Loaded by path (dofile), never by require,
 -- so nothing under tests/ joins the plugin's public module tree.
 local uv = vim.uv
 local H = {}
@@ -9,8 +11,13 @@ local H = {}
 local passed, failed, skipped = 0, 0, 0
 -- nil until H.finish() rules, then "pass" or "fail".
 local verdict
--- Set while H.finish() runs, so a quit its own drain runs is named as such.
+-- Set once H.finish() starts its drain, so a quit a cleanup or a callback
+-- runs from there is named as the drain's, and H.defer refuses a cleanup
+-- that would never run.
 local finishing = false
+-- The guard every ledger entry point runs, defined with the ledger below;
+-- the raw client, which comes first, runs it too.
+local open_ledger
 local errors = {}
 local tests_dir = vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))
 
@@ -459,18 +466,35 @@ function H.http_get(url, headers)
 end
 
 -- A raw TCP client for the requests curl cannot send: a request line split
--- across writes, a missing or doubled Host, a NUL byte, a half-close, an
--- abort, an event stream read with a bound. Every luv call's nil, err is
--- read, never hidden in a pcall around a closure, and every wait has its
--- own bound. The connect bound sits above Windows's two-second retry of a
--- refused loopback connect (the H.http_get comment's measurement). host is
--- an IP literal: luv raises on a name instead of returning nil, err, and
--- that raise is the suite's own defect.
+-- across writes, a NUL byte, a half-close, an abort, an event stream read
+-- with a bound. Every luv call's nil, err is read, never hidden in a pcall
+-- around a closure, and every wait has its own bound. The connect bound
+-- sits above Windows's two-second retry of a refused loopback connect (the
+-- H.http_get comment's measurement). The port and host are checked before
+-- any handle exists, a refusal at the suite's line: luv truncates a
+-- fraction or an out-of-range port onto another port, and raises on a host
+-- name, where an IP literal returns nil, err.
 local Raw = {}
 Raw.__index = Raw
 local RAW_CONNECT_MS, RAW_STEP_MS = 5000, 2000
 
 function H.raw_connect(port, host)
+	open_ledger("H.raw_connect")
+	-- Its deferred close would be refused once the drain has begun, so the
+	-- refusal comes before any handle exists.
+	if finishing then
+		error("H.raw_connect during a cleanup drain: connect before H.finish()", 2)
+	end
+	if type(port) ~= "number" or port ~= math.floor(port) or port < 1 or port > 65535 then
+		error("H.raw_connect: port must be an integer from 1 to 65535, got " .. tostring(port), 2)
+	end
+	-- An IPv6 literal carries colons.
+	if
+		host ~= nil
+		and not (type(host) == "string" and (host:match("^%d+%.%d+%.%d+%.%d+$") or host:find(":", 1, true)))
+	then
+		error("H.raw_connect: host must be an IP literal, got " .. tostring(host), 2)
+	end
 	local tcp, terr = uv.new_tcp()
 	if not tcp then
 		return nil, terr
@@ -511,7 +535,9 @@ function H.raw_connect(port, host)
 	return c
 end
 
--- Writes bytes and waits for libuv to take them.
+-- Writes bytes and waits for libuv to take them. A peer that closes early
+-- fails the send with EPIPE; a row that expects a refusal reads that error,
+-- never a reply.
 function Raw:send(bytes)
 	local done, werr = false, nil
 	local req, err = self.tcp:write(bytes, function(e)
@@ -551,10 +577,11 @@ function Raw:half_close()
 	return true
 end
 
--- An RST where a test needs a reset; a closing handle has none to send.
+-- An RST where a test needs a reset. A closing handle has none to send, so
+-- it answers nil and says so, never true for a reset that did not go out.
 function Raw:abort()
 	if self.tcp:is_closing() then
-		return true
+		return nil, "already closing"
 	end
 	local r, err = self.tcp:close_reset()
 	if not r then
@@ -582,7 +609,9 @@ function Raw:read(ms, stop_when)
 	return bytes(), self.eof
 end
 
--- One request on a fresh connection, read until the server closes it.
+-- One request on a fresh connection, read until the server closes it: the
+-- bytes, whether the peer ended, and the read's error, nil after a FIN and
+-- ECONNRESET after a reset.
 function H.raw_request(port, bytes, ms)
 	local c, err = H.raw_connect(port)
 	if not c then
@@ -595,15 +624,33 @@ function H.raw_request(port, bytes, ms)
 	end
 	local data, eof = c:read(ms or 3000)
 	c:close()
-	return data, eof
+	return data, eof, c.err
+end
+
+-- Whether a head's lines split as header lines: each ends in CRLF, never a
+-- bare CR or LF, and each after the status line carries a colon.
+local function head_splits(head)
+	if head:gsub("\r\n", ""):find("[\r\n]") then
+		return false
+	end
+	for line in head:gmatch("\r\n([^\r\n]+)") do
+		if not line:find(":", 1, true) then
+			return false
+		end
+	end
+	return true
 end
 
 -- Splits raw bytes into HTTP/1.1 responses. A body runs for its
 -- Content-Length, or to the end of the bytes when there is none (an event
 -- stream), so a status line spliced into a streamed body shows as a body
--- that differs from the file, never as a second response. Bytes that do not
--- parse stop the split and return the responses read so far, so a row that
--- asserts a header is absent checks the count or the status first.
+-- that differs from the file, never as a second response; a 1xx, 204 or 304
+-- has none (RFC 9112 6.3). complete says whether a body holds its whole
+-- Content-Length. Bytes that do not parse, a head with a bare CR or LF or a
+-- header line without a colon among them, stop the split: the responses
+-- read so far come back with the unparsed tail as a second value, "" when
+-- everything parsed, so a row that asserts a header is absent reads through
+-- H.response.
 function H.responses(data)
 	local list, pos = {}, 1
 	while pos <= #data do
@@ -613,7 +660,7 @@ function H.responses(data)
 		end
 		local head = data:sub(pos, head_end - 1)
 		local code, rest = head:match("^HTTP/1%.1 (%d%d%d)([^\r\n]*)")
-		if not code or (rest ~= "" and rest:sub(1, 1) ~= " ") then
+		if not code or (rest ~= "" and rest:sub(1, 1) ~= " ") or not head_splits(head) then
 			break
 		end
 		local reason = rest:sub(2)
@@ -630,28 +677,44 @@ function H.responses(data)
 		-- A negative length moves pos backwards and loops forever; hex or a
 		-- fraction reads a length the server never writes, so digits only.
 		local len = tonumber((r.headers["content-length"] or ""):match("^%d+$"))
-		if len then
+		if (r.status >= 100 and r.status < 200) or r.status == 204 or r.status == 304 then
+			r.body, r.complete = "", true
+			pos = body_start
+		elseif len then
 			r.body = data:sub(body_start, body_start + len - 1)
+			r.complete = #r.body == len
 			pos = body_start + len
 		else
 			r.body = data:sub(body_start)
+			r.complete = true
 			pos = #data + 1
 		end
 		table.insert(list, r)
 	end
-	return list
+	return list, data:sub(pos)
+end
+
+-- The first response of the bytes, or a raise: a row that asserts a header
+-- is absent must fail when nothing parsed, never pass on an empty list.
+function H.response(data)
+	local r = H.responses(data)[1]
+	if not r then
+		error("H.response: no response parsed from " .. vim.inspect(data:sub(1, 80)), 2)
+	end
+	return r
 end
 
 -- Open descriptors of this process: /proc/self/fd on Linux, /dev/fd on
 -- macOS (20 raw connections add 40, a client and an accepted socket each,
 -- and their closes give them back, measured on macOS). A leak the ledger
 -- cannot see shows here. nil on Windows, which has neither; a listing that
--- fails elsewhere raises, so a leak row never skips by accident.
-function H.fd_count()
+-- fails elsewhere raises, so a leak row never skips by accident. dir is for
+-- the rows: a missing directory proves the raise.
+function H.fd_count(dir)
 	if is_win then
 		return nil
 	end
-	local dir = uv.fs_stat("/proc/self/fd") and "/proc/self/fd" or "/dev/fd"
+	dir = dir or (uv.fs_stat("/proc/self/fd") and "/proc/self/fd" or "/dev/fd")
 	local handle, err = uv.fs_scandir(dir)
 	if not handle then
 		error("H.fd_count: " .. tostring(err), 2)
@@ -663,16 +726,67 @@ function H.fd_count()
 	return n
 end
 
--- Live luv handles of one kind: "tcp", "timer", "fs_event". A handle left
--- open after a server stops, or after a start that raised, is a leak no
--- ledger line would otherwise show.
+-- Handles counted by creation, never by uv.walk: the walk segfaults every
+-- Neovim 0.10.x, the floor, and on 0.12 it visits luv's handles alone. A
+-- handle stays in the table until a count finds it closing, never weakly:
+-- LuaJIT keeps a finalized handle's weak key for one more collection, and
+-- is_closing() on it segfaults (measured on 0.10.0 and 0.12.5).
+local handles = {}
+local HANDLE_KINDS = { "tcp", "timer", "fs_event", "pipe", "udp", "fs_poll" }
+-- Every 64th registration drops the closed handles, so a suite that never
+-- counts does not hold every handle it made until it exits.
+local registered = 0
+local function prune()
+	for h in pairs(handles) do
+		if h:is_closing() then
+			handles[h] = nil
+		end
+	end
+end
+for _, kind in ipairs(HANDLE_KINDS) do
+	local make = uv["new_" .. kind]
+	if make then
+		uv["new_" .. kind] = function(...)
+			local h, err = make(...)
+			if h then
+				handles[h] = kind
+				registered = registered + 1
+				if registered % 64 == 0 then
+					prune()
+				end
+			end
+			return h, err
+		end
+	end
+end
+
+-- Live handles of one kind created since the harness loaded: "tcp",
+-- "timer", "fs_event", "pipe", "udp", "fs_poll". A kind outside that list
+-- raises, so a leak row with a misspelt kind never counts zero on both
+-- sides and passes. A handle stays counted until close() marks it closing,
+-- and a peer's close runs in a later callback, so a baseline is taken
+-- after H.wait_for settles the previous case's sockets.
 function H.handle_count(kind)
+	if not vim.tbl_contains(HANDLE_KINDS, kind) then
+		error("H.handle_count: unknown kind " .. tostring(kind), 2)
+	end
+	prune()
 	local n = 0
-	uv.walk(function(h)
-		if h:get_type() == kind and not h:is_closing() then
+	for _, k in pairs(handles) do
+		if k == kind then
 			n = n + 1
 		end
-	end)
+	end
+	return n
+end
+
+-- The registry's entries, open or not yet pruned: the rows' window onto
+-- its pruning, never a count a suite should rule on.
+function H._registry_size()
+	local n = 0
+	for _ in pairs(handles) do
+		n = n + 1
+	end
 	return n
 end
 
@@ -739,7 +853,7 @@ function H.expect_error(pattern, fn)
 end
 
 -- An assertion after the ruling would never reach the exit code.
-local function open_ledger(caller)
+open_ledger = function(caller)
 	if verdict then
 		error(caller .. " after H.finish(): the ruling is already out", 3)
 	end
@@ -863,6 +977,11 @@ end
 
 function H.defer(fn)
 	open_ledger("H.defer")
+	-- The drain in H.finish empties the list once and rules, so a cleanup
+	-- registered from then on would never run.
+	if finishing then
+		error("H.defer during a cleanup drain: the list is being emptied", 2)
+	end
 	if type(fn) ~= "function" then
 		error("H.defer: a function is required", 2)
 	end
@@ -901,8 +1020,8 @@ end
 -- (measured), so a cq that raises or returns falls through to the real exit.
 function H.finish()
 	open_ledger("H.finish")
-	run_deferred(0)
 	finishing = true
+	run_deferred(0)
 	for _, e in ipairs(H.errors()) do
 		failed = failed + 1
 		H.write_line("  FAIL: error reported: " .. headline(e))
