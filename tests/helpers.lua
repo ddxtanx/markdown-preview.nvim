@@ -458,6 +458,229 @@ function H.http_get(url, headers)
 	return { status = tonumber(status) or 0, body = body or "", curl_exit = 0 }
 end
 
+-- A raw TCP client for the requests curl cannot send: a request line split
+-- across writes, a missing or doubled Host, a NUL byte, a half-close, an
+-- abort, an event stream read with a bound. Every luv call's nil, err is
+-- read, never hidden in a pcall around a closure, and every wait has its
+-- own bound. The connect bound sits above Windows's two-second retry of a
+-- refused loopback connect (the H.http_get comment's measurement). host is
+-- an IP literal: luv raises on a name instead of returning nil, err, and
+-- that raise is the suite's own defect.
+local Raw = {}
+Raw.__index = Raw
+local RAW_CONNECT_MS, RAW_STEP_MS = 5000, 2000
+
+function H.raw_connect(port, host)
+	local tcp, terr = uv.new_tcp()
+	if not tcp then
+		return nil, terr
+	end
+	local done, conn_err = false, nil
+	local req, err = tcp:connect(host or "127.0.0.1", port, function(e)
+		conn_err, done = e, true
+	end)
+	if not req then
+		tcp:close()
+		return nil, err
+	end
+	if not vim.wait(RAW_CONNECT_MS, function()
+		return done
+	end, 5) then
+		tcp:close()
+		return nil, "connect timed out"
+	end
+	if conn_err then
+		tcp:close()
+		return nil, conn_err
+	end
+	local c = setmetatable({ tcp = tcp, chunks = {}, eof = false }, Raw)
+	local reading, rerr = tcp:read_start(function(e, chunk)
+		if chunk then
+			table.insert(c.chunks, chunk)
+		else
+			c.eof, c.err = true, e
+		end
+	end)
+	if not reading then
+		tcp:close()
+		return nil, rerr
+	end
+	H.defer(function()
+		c:close()
+	end)
+	return c
+end
+
+-- Writes bytes and waits for libuv to take them.
+function Raw:send(bytes)
+	local done, werr = false, nil
+	local req, err = self.tcp:write(bytes, function(e)
+		werr, done = e, true
+	end)
+	if not req then
+		return nil, err
+	end
+	if not vim.wait(RAW_STEP_MS, function()
+		return done
+	end, 5) then
+		return nil, "write timed out"
+	end
+	if werr then
+		return nil, werr
+	end
+	return true
+end
+
+-- Ends the write side (a FIN) and keeps reading.
+function Raw:half_close()
+	local done, serr = false, nil
+	local req, err = self.tcp:shutdown(function(e)
+		serr, done = e, true
+	end)
+	if not req then
+		return nil, err
+	end
+	if not vim.wait(RAW_STEP_MS, function()
+		return done
+	end, 5) then
+		return nil, "shutdown timed out"
+	end
+	if serr then
+		return nil, serr
+	end
+	return true
+end
+
+-- An RST where a test needs a reset; a closing handle has none to send.
+function Raw:abort()
+	if self.tcp:is_closing() then
+		return true
+	end
+	local r, err = self.tcp:close_reset()
+	if not r then
+		return nil, err
+	end
+	return true
+end
+
+function Raw:close()
+	if not self.tcp:is_closing() then
+		self.tcp:close()
+	end
+end
+
+-- The bytes received so far, after waiting up to ms for the peer's end or
+-- for stop_when(bytes) to hold; eof says whether the peer ended. self.err
+-- tells a reset from a FIN: ECONNRESET after a reset, nil after a FIN.
+function Raw:read(ms, stop_when)
+	local function bytes()
+		return table.concat(self.chunks)
+	end
+	vim.wait(ms, function()
+		return self.eof or (stop_when ~= nil and stop_when(bytes()))
+	end, 5)
+	return bytes(), self.eof
+end
+
+-- One request on a fresh connection, read until the server closes it.
+function H.raw_request(port, bytes, ms)
+	local c, err = H.raw_connect(port)
+	if not c then
+		return nil, err
+	end
+	local sent, serr = c:send(bytes)
+	if not sent then
+		c:close()
+		return nil, serr
+	end
+	local data, eof = c:read(ms or 3000)
+	c:close()
+	return data, eof
+end
+
+-- Splits raw bytes into HTTP/1.1 responses. A body runs for its
+-- Content-Length, or to the end of the bytes when there is none (an event
+-- stream), so a status line spliced into a streamed body shows as a body
+-- that differs from the file, never as a second response. Bytes that do not
+-- parse stop the split and return the responses read so far, so a row that
+-- asserts a header is absent checks the count or the status first.
+function H.responses(data)
+	local list, pos = {}, 1
+	while pos <= #data do
+		local head_end = data:find("\r\n\r\n", pos, true)
+		if not head_end then
+			break
+		end
+		local head = data:sub(pos, head_end - 1)
+		local code, rest = head:match("^HTTP/1%.1 (%d%d%d)([^\r\n]*)")
+		if not code or (rest ~= "" and rest:sub(1, 1) ~= " ") then
+			break
+		end
+		local reason = rest:sub(2)
+		local r = { status = tonumber(code), reason = reason, headers = {}, count = {} }
+		for name, value in head:gmatch("\r\n([^:\r\n]+):[ \t]*([^\r\n]*)") do
+			name = name:lower()
+			-- Trailing blanks go through one greedy match: an anchored gsub
+			-- rescans a run of blanks from every start and turns quadratic.
+			value = value:match("^(.*[^ \t])") or ""
+			r.count[name] = (r.count[name] or 0) + 1
+			r.headers[name] = r.headers[name] or value
+		end
+		local body_start = head_end + 4
+		-- A negative length moves pos backwards and loops forever; hex or a
+		-- fraction reads a length the server never writes, so digits only.
+		local len = tonumber((r.headers["content-length"] or ""):match("^%d+$"))
+		if len then
+			r.body = data:sub(body_start, body_start + len - 1)
+			pos = body_start + len
+		else
+			r.body = data:sub(body_start)
+			pos = #data + 1
+		end
+		table.insert(list, r)
+	end
+	return list
+end
+
+-- Open descriptors of this process: /proc/self/fd on Linux, /dev/fd on
+-- macOS (20 raw connections add 40, a client and an accepted socket each,
+-- and their closes give them back, measured on macOS). A leak the ledger
+-- cannot see shows here. nil on Windows, which has neither; a listing that
+-- fails elsewhere raises, so a leak row never skips by accident.
+function H.fd_count()
+	if is_win then
+		return nil
+	end
+	local dir = uv.fs_stat("/proc/self/fd") and "/proc/self/fd" or "/dev/fd"
+	local handle, err = uv.fs_scandir(dir)
+	if not handle then
+		error("H.fd_count: " .. tostring(err), 2)
+	end
+	local n = 0
+	while uv.fs_scandir_next(handle) do
+		n = n + 1
+	end
+	return n
+end
+
+-- Live luv handles of one kind: "tcp", "timer", "fs_event". A handle left
+-- open after a server stops, or after a start that raised, is a leak no
+-- ledger line would otherwise show.
+function H.handle_count(kind)
+	local n = 0
+	uv.walk(function(h)
+		if h:get_type() == kind and not h:is_closing() then
+			n = n + 1
+		end
+	end)
+	return n
+end
+
+-- Waits up to ms for pred() to hold; whether it did.
+function H.wait_for(pred, ms)
+	return vim.wait(ms, pred, 5) == true
+end
+
 -- An error raised in a libuv or vim.schedule callback, where every server
 -- handler runs, prints a traceback and leaves the exit code at 0; v:errmsg is
 -- the one trace of it a script can read, and it holds only the latest
@@ -623,6 +846,48 @@ function H.skip(msg)
 	H.write_line("  SKIP: " .. msg)
 end
 
+-- Cleanups a suite registers: stop a server, close a client. H.case runs
+-- the ones registered inside it when it ends, raise or not, and H.finish
+-- runs whatever is left before it rules, so a failed or raising section
+-- never leaves a listener or a socket for the next one to count.
+local deferred = {}
+local function run_deferred(mark)
+	while #deferred > mark do
+		local ok, err = pcall(table.remove(deferred))
+		if not ok then
+			failed = failed + 1
+			H.write_line("  FAIL: a cleanup raised: " .. headline(tostring(err)))
+		end
+	end
+end
+
+function H.defer(fn)
+	open_ledger("H.defer")
+	if type(fn) ~= "function" then
+		error("H.defer: a function is required", 2)
+	end
+	table.insert(deferred, fn)
+end
+
+-- A section whose body runs under xpcall: a raise is one FAIL naming the
+-- section, the sections after it still run, and its cleanups run either
+-- way. A raise after the ruling escapes, so it fails the run as an
+-- assertion after H.finish() does outside a case.
+function H.case(title, fn)
+	open_ledger("H.case")
+	H.section(title)
+	local mark = #deferred
+	local ok, err = xpcall(fn, debug.traceback)
+	if not ok then
+		if verdict then
+			error(err, 0)
+		end
+		failed = failed + 1
+		H.write_line("  FAIL: " .. title .. " raised: " .. headline(tostring(err)))
+	end
+	run_deferred(mark)
+end
+
 -- The exit code is the ruling every gate reads; the summary is for the reader.
 -- A suite that asserted nothing proved nothing, so it fails as well, and so
 -- does one whose callbacks raised, and one whose skips exceed a quarter of
@@ -636,6 +901,7 @@ end
 -- (measured), so a cq that raises or returns falls through to the real exit.
 function H.finish()
 	open_ledger("H.finish")
+	run_deferred(0)
 	finishing = true
 	for _, e in ipairs(H.errors()) do
 		failed = failed + 1

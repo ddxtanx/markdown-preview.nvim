@@ -1083,4 +1083,303 @@ else
 	H.skip("an ELOOP met through H.same_path names the suite's line (no symlink here)")
 end
 
+H.section("Section 8: teardown, the raw client, the response reader, the counters")
+-- A section that raises must still stop what it started: the next section
+-- counts sockets and descriptors, and a leftover listener would skew it.
+eq(
+	child_exit(
+		[[
+H.case("boom", function()
+    H.defer(function() io.stdout:write("cleanup ran\n") end)
+    error("deliberate")
+end)
+H.ok(true, "after")
+H.finish()]],
+		"FAIL: boom raised: .*deliberate.*cleanup ran.*PASS: after"
+	),
+	1,
+	"a raising H.case is one FAIL, runs its cleanups, and the suite goes on"
+)
+eq(
+	child_exit(
+		[[
+H.defer(function() io.stdout:write("left over\n") end)
+H.ok(true, "x")
+H.finish()]],
+		"left over.*Results: 1 passed"
+	),
+	0,
+	"H.finish runs the cleanups still registered before it rules"
+)
+eq(
+	child_exit(
+		[[
+H.defer(function() error("cleanup broke") end)
+H.ok(true, "x")
+H.finish()]],
+		"FAIL: a cleanup raised: .*cleanup broke"
+	),
+	1,
+	"a cleanup that raises fails the suite"
+)
+-- H.case and H.defer run the guard every entry point runs, so a suite
+-- defect after the ruling exits 1 instead of reading as a pass.
+eq(
+	child_exit(
+		[[
+H.ok(true, "x")
+H.finish()
+H.case("late", function() H.ok(true, "y") end)]],
+		"H%.case after H%.finish%(%)"
+	),
+	1,
+	"an H.case after H.finish() exits 1"
+)
+eq(
+	child_exit(
+		[[
+H.ok(true, "x")
+H.finish()
+H.defer(function() end)]],
+		"H%.defer after H%.finish%(%)"
+	),
+	1,
+	"an H.defer after H.finish() exits 1"
+)
+eq(
+	child_exit(
+		[[
+H.defer(nil)
+H.ok(true, "x")
+H.finish()]],
+		"a function is required"
+	),
+	1,
+	"H.defer refuses a cleanup that is not a function"
+)
+ok(
+	blames_caller(function()
+		H.defer(nil)
+	end, "H%.defer: a function is required"),
+	"H.defer refuses nil at the suite's line"
+)
+-- H.finish() inside a case puts the ruling out mid-body, so the next
+-- assertion's raise must escape the xpcall and fail the run.
+eq(
+	child_exit(
+		[[
+H.case("inner finish", function()
+    H.ok(true, "a")
+    H.finish()
+    H.ok(true, "late")
+end)]],
+		"H%.ok after H%.finish%(%)"
+	),
+	1,
+	"a raise after the ruling escapes H.case"
+)
+-- The order later suites rely on: a client closes before the server it
+-- talks to, one broken cleanup leaves the rest to run, and a case's
+-- cleanups finish before the suite goes on while the suite's own cleanups wait.
+local order, order_out = child_exit(
+	[[
+H.defer(function() io.stdout:write("outer\n") end)
+H.case("cleanup order", function()
+    H.defer(function() io.stdout:write("first\n") end)
+    H.defer(function()
+        io.stdout:write("second\n")
+        error("second broke")
+    end)
+    H.defer(function() io.stdout:write("third\n") end)
+end)
+H.ok(true, "x")
+H.finish()]],
+	"third\n.*FAIL: a cleanup raised: [^\n]*second broke\nfirst\n  PASS: x\nouter\n"
+)
+eq(order, 1, "cleanups run in reverse registration order")
+ok(
+	order_out:find("second broke\nfirst\n", 1, true) ~= nil,
+	"a cleanup that raises does not stop the ones registered before it"
+)
+ok(
+	order_out:find("first\n  PASS: x\nouter\n", 1, true) ~= nil,
+	"an H.case runs only its own cleanups, the suite's cleanups wait for H.finish"
+)
+
+-- A peer that keeps every byte it reads and notes the client's FIN or
+-- reset: it shows what the raw client put on the wire. It answers at the
+-- FIN, never on a complete head, so an answer read after half_close
+-- proves the client still reads once its write side has ended.
+local function recorder(reply)
+	local rec = { bytes = "" }
+	local srv = assert(uv.new_tcp())
+	assert(srv:bind("127.0.0.1", 0))
+	assert(srv:listen(8, function()
+		local c = assert(uv.new_tcp())
+		assert(srv:accept(c))
+		-- The accepted socket is the case's to close as well, so a row that
+		-- never reads the peer's end leaves no handle for a counter to see.
+		H.defer(function()
+			if not c:is_closing() then
+				c:close()
+			end
+		end)
+		assert(c:read_start(function(err, data)
+			if data then
+				rec.bytes = rec.bytes .. data
+			else
+				rec.ended = err or "EOF"
+				-- A reset leaves nothing writable, so the answer goes out on a
+				-- FIN alone; a raise here would leave the socket open.
+				if not c:is_closing() then
+					if reply and not err then
+						assert(c:write(reply, function()
+							if not c:is_closing() then
+								c:close()
+							end
+						end))
+					else
+						c:close()
+					end
+				end
+			end
+		end))
+	end))
+	H.defer(function()
+		if not srv:is_closing() then
+			srv:close()
+		end
+	end)
+	return assert(srv:getsockname()).port, rec
+end
+
+H.case("the raw client", function()
+	local gone = assert(uv.new_tcp())
+	assert(gone:bind("127.0.0.1", 0))
+	local gone_port = assert(gone:getsockname()).port
+	gone:close()
+	local nobody, nobody_err = H.raw_connect(gone_port)
+	ok(nobody == nil and nobody_err ~= nil, "a refused port yields no client and an error: " .. tostring(nobody_err))
+
+	local rport, rec = recorder(nil)
+	local rc = assert(H.raw_connect(rport))
+	assert(rc:send("GET /sty"))
+	vim.wait(50)
+	assert(rc:send("le.css HTTP/1.1\r\n\r\n"))
+	vim.wait(2000, function()
+		return rec.bytes:find("\r\n\r\n", 1, true) ~= nil
+	end, 5)
+	eq(rec.bytes, "GET /style.css HTTP/1.1\r\n\r\n", "two writes arrive in order as one byte stream")
+	rc:close()
+
+	rport, rec = recorder(nil)
+	rc = assert(H.raw_connect(rport))
+	assert(rc:send("GET /a\0b HTTP/1.1\r\n\r\n"))
+	vim.wait(2000, function()
+		return rec.bytes:find("\r\n\r\n", 1, true) ~= nil
+	end, 5)
+	eq(rec.bytes, "GET /a\0b HTTP/1.1\r\n\r\n", "a NUL byte goes on the wire as written")
+	rc:close()
+
+	rport, rec = recorder("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
+	rc = assert(H.raw_connect(rport))
+	assert(rc:send("GET / HTTP/1.1\r\n\r\n"))
+	ok(rc:half_close() == true, "half_close sends a FIN")
+	vim.wait(2000, function()
+		return rec.ended ~= nil
+	end, 5)
+	eq(rec.ended, "EOF", "the peer reads the FIN as the end of the request")
+	local got = rc:read(2000, function(d)
+		return d:find("hi$") ~= nil
+	end)
+	ok(got:find("hi$") ~= nil, "the client still reads the answer after its FIN")
+	rc:close()
+
+	rport, rec = recorder(nil)
+	rc = assert(H.raw_connect(rport))
+	assert(rc:send("GET"))
+	vim.wait(100)
+	local reset, reset_err = rc:abort()
+	ok(reset == true, "abort reports the reset it sent: " .. tostring(reset_err))
+	vim.wait(2000, function()
+		return rec.ended ~= nil
+	end, 5)
+	ok(rec.ended ~= nil and rec.ended ~= "EOF", "abort resets the connection: " .. tostring(rec.ended))
+
+	rport = recorder(nil)
+	rc = assert(H.raw_connect(rport))
+	local t0 = uv.hrtime()
+	local silent, eof = rc:read(300)
+	ok(silent == "" and eof == false, "a silent peer reads nothing and no end")
+	ok((uv.hrtime() - t0) / 1e6 < 2000, "within the read bound")
+	ok((uv.hrtime() - t0) / 1e6 >= 250, "and not before the bound")
+	rc:close()
+end)
+
+H.case("the response reader", function()
+	local two = H.responses(
+		"HTTP/1.1 401 Unauthorized\r\nContent-Length: 3\r\nX-A: 1\r\nx-a: 2\r\n\r\nabc"
+			.. "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\nretry: 1000\n\n"
+	)
+	eq(#two, 2, "two responses back to back parse as two")
+	eq(two[1] and two[1].reason, "Unauthorized", "the reason phrase is read")
+	eq(two[1] and two[1].body, "abc", "a body runs for its Content-Length")
+	eq(two[1] and two[1].count["x-a"], 2, "a repeated header is counted, whatever its case")
+	eq(two[2] and two[2].headers["content-type"], "text/event-stream", "header names are lowercased")
+	eq(two[2] and two[2].body, "retry: 1000\n\n", "a body without Content-Length runs to the end")
+	eq(two[1] and two[1].status, 401, "the status code is read as a number")
+	eq(two[1] and two[1].headers["x-a"], "1", "a repeated header keeps its first value")
+	eq(#H.responses("HTTP/1.1 200 OK\r\nContent-Length: 3\r\n"), 0, "a head without its blank line is no response")
+	eq(
+		H.responses("HTTP/1.1 200 OK\r\nContent-Length: -100\r\n\r\nabc")[1].body,
+		"abc",
+		"a length that is not decimal digits reads the body to the end"
+	)
+	eq(
+		#H.responses(
+			"HTTP/1.1 200 OK\r\nContent-Length: 3 \r\n\r\nabcHTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
+		),
+		2,
+		"a length with trailing whitespace still bounds its body"
+	)
+	eq(#H.responses("HTTP/1.0 200 OK\r\nContent-Length: 0\r\n\r\n"), 0, "an HTTP/1.0 status line is no response")
+	eq(#H.responses("HTTP/1.1 2000 OK\r\nContent-Length: 0\r\n\r\n"), 0, "a four-digit status is no response")
+end)
+
+H.case("the counters", function()
+	-- A handle's release is asynchronous and a peer's close runs in a later
+	-- callback, so a count settles through H.wait_for before it is compared.
+	local fds = H.fd_count()
+	if fds then
+		local probe_file = vim.fs.joinpath(H.tmpdir(), "fd-probe")
+		H.write_file(probe_file, "x")
+		local fd = assert(uv.fs_open(probe_file, "r", 438))
+		eq(H.fd_count(), fds + 1, "an open file counts as one descriptor")
+		assert(uv.fs_close(fd))
+		ok(
+			H.wait_for(function()
+				return H.fd_count() == fds
+			end, 1000),
+			"and its close gives it back"
+		)
+	else
+		H.skip("an open file counts as one descriptor (no descriptor listing on this platform)")
+		H.skip("and its close gives it back (no descriptor listing on this platform)")
+	end
+	local tcps = H.handle_count("tcp")
+	local extra = uv.new_tcp()
+	eq(H.handle_count("tcp"), tcps + 1, "an open TCP handle is counted")
+	extra:close()
+	eq(H.handle_count("tcp"), tcps, "a closing one is not")
+	ok(
+		H.wait_for(function()
+			return true
+		end, 10),
+		"H.wait_for returns true when the condition holds"
+	)
+	ok(not H.wait_for(function()
+		return false
+	end, 50), "and false when the bound runs out")
+end)
+
 H.finish()
