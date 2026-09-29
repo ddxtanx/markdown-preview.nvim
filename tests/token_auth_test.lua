@@ -430,6 +430,72 @@ H.case("Section 6c: a host changed while the server runs leaves the URL to the b
 		url:find("?t=", 1, true) ~= nil and got.status == 200,
 		('a retarget after setup({ host = "127.0.0.1" }) keeps ?t= and answers 200: %s, %d'):format(url, got.status)
 	)
+	eq(got.body:match('data%-live%-token="([^"]*)"'), "", "the retargeted index bakes no token")
+end)
+
+-- The stream's status for the token a page at url is handed, 0 when none.
+local function stream_status_for(port, token)
+	if token == "" then
+		return 0
+	end
+	local c, cerr = H.raw_connect(port)
+	if not c then
+		H.write_line("connect failed: " .. tostring(cerr))
+		return 0
+	end
+	local status = 0
+	local sent, serr = c:send(("GET /__live/events?t=%s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n\r\n"):format(token, port))
+	if sent then
+		local head = c:read(3000, function(b)
+			return b:find("\r\n\r\n", 1, true) ~= nil
+		end)
+		local first = H.responses(head)[1]
+		status = first and first.status or 0
+	else
+		H.write_line("send failed: " .. tostring(serr))
+	end
+	c:close()
+	return status
+end
+
+H.case("Section 6d: a host changed while the server runs leaves the bake to the bound address", function()
+	local url
+	mp.setup({
+		open_browser = false,
+		instance_mode = "multi",
+		port = 0,
+		host = "127.0.0.1",
+		hooks = {
+			on_start = function(u)
+				url = u
+			end,
+		},
+	})
+	mp.start()
+	H.defer(mp.stop)
+	local port = mp._server_instance and mp._server_instance.port or 0
+	local other = vim.fs.joinpath(tmpdir, "other.md")
+	H.write_file(other, "# other\n")
+	vim.cmd("edit " .. vim.fn.fnameescape(other))
+	vim.bo.filetype = "markdown"
+	H.defer(function()
+		vim.cmd("edit " .. vim.fn.fnameescape(mdfile))
+	end)
+	mp.setup({ host = "0.0.0.0" })
+	url = nil
+	mp.start()
+	url = url or ""
+	local page = url ~= "" and http_get(url) or { status = 0, body = "" }
+	local baked = page.body:match('data%-live%-token="([^"]*)"') or ""
+	ok(
+		not url:find("t=", 1, true) and page.status == 200 and baked == mp._token,
+		("the retarget's tokenless URL opens an index that bakes the token: %s, %d, %s"):format(
+			url,
+			page.status,
+			baked ~= "" and "token baked" or "no token baked"
+		)
+	)
+	eq(stream_status_for(port, baked), 200, "the stream opens with the baked token")
 end)
 -- The tokenless URL still opens a page whose stream authenticates, with the
 -- token the served index hands the page.
