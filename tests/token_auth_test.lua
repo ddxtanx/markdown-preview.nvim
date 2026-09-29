@@ -298,16 +298,16 @@ if v6 then
 	local keyed = http_get(("http://[::1]:%d/?t=%s"):format(v6_port, mp._token or ""))
 	mp.stop()
 	ok(
-		bare.status == 401 and keyed.status == 200 and keyed.body:find('data-live-token=""', 1, true) ~= nil,
-		("a ::1 bind bakes no token into its index and answers 401 without one: %d, %d"):format(
-			bare.status,
-			keyed.status
-		)
+		bare.status == 401 and keyed.status == 200,
+		("a ::1 bind answers 401 without the token and 200 with it: %d, %d"):format(bare.status, keyed.status)
 	)
+	local baked = keyed.body:match('data%-live%-token="([^"]*)"')
+	eq(baked, "", "a ::1 bind bakes no token into its index")
 else
 	H.skip("an IPv6 loopback bind yields http://[::1]:<port>/?t=<token> (no IPv6 loopback here)")
 	H.skip("an IPv6 wildcard bind yields http://[::1]:<port>/?t=<token> (no IPv6 loopback here)")
-	H.skip("a ::1 bind bakes no token into its index and answers 401 without one (no IPv6 loopback here)")
+	H.skip("a ::1 bind answers 401 without the token and 200 with it (no IPv6 loopback here)")
+	H.skip("a ::1 bind bakes no token into its index (no IPv6 loopback here)")
 end
 
 H.finish()
