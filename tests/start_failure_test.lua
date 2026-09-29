@@ -188,7 +188,8 @@ H.case("Section 1c2: any other start failure keeps the generic notice", function
 end)
 
 -- A port another program listens on, for the start to meet the real
--- refusal; port nil or 0 lets the OS choose.
+-- refusal; port nil or 0 lets the OS choose. A fixed port some other
+-- listener already holds is taken too, so that listener is used as found.
 local function held_port(addr, port)
 	local tcp, tcp_err = vim.uv.new_tcp()
 	if not tcp then
@@ -197,12 +198,22 @@ local function held_port(addr, port)
 	H.defer(function()
 		tcp:close()
 	end)
+	local function taken(err)
+		return port and port ~= 0 and tostring(err):find("EADDRINUSE: address already in use", 1, true) ~= nil
+	end
 	local bound, bind_err = tcp:bind(addr, port or 0)
 	if not bound then
+		if taken(bind_err) then
+			return port
+		end
 		error("held_port: " .. tostring(bind_err), 0)
 	end
+	-- libuv may report a bind's EADDRINUSE only at the listen.
 	local listening, listen_err = tcp:listen(8, function() end)
 	if not listening then
+		if taken(listen_err) then
+			return port
+		end
 		error("held_port: " .. tostring(listen_err), 0)
 	end
 	local name, name_err = tcp:getsockname()
@@ -210,6 +221,43 @@ local function held_port(addr, port)
 		error("held_port: " .. tostring(name_err), 0)
 	end
 	return name.port
+end
+
+-- A second Neovim listening on addr:port until the enclosing case ends;
+-- it exits by itself after 30 s if the kill is missed.
+local function child_holding(addr, port)
+	local script = vim.fs.joinpath(H.tmpdir(), "hold.lua")
+	H.write_file(
+		script,
+		([[
+local tcp = vim.uv.new_tcp()
+local bound, err = tcp:bind(%q, %d)
+if bound then
+	bound, err = tcp:listen(8, function() end)
+end
+io.stdout:write(bound and "listening\n" or ("refused " .. tostring(err) .. "\n"))
+io.stdout:flush()
+vim.wait(30000, function() return false end)
+]]):format(addr, port)
+	)
+	local said = {}
+	local proc = vim.system({ vim.v.progpath, "--headless", "-u", "NONE", "-l", script }, {
+		stdout = function(_, data)
+			if data then
+				table.insert(said, data)
+			end
+		end,
+	})
+	H.defer(function()
+		proc:kill(9)
+		proc:wait(5000)
+	end)
+	if not H.wait_for(function()
+		return #said > 0
+	end, 10000) then
+		error("child_holding: the child said nothing in 10 s", 0)
+	end
+	return table.concat(said)
 end
 
 H.case("Section 1c4: an OS-assigned port refused keeps the generic notice", function()
@@ -228,23 +276,32 @@ H.case("Section 1c4: an OS-assigned port refused keeps the generic notice", func
 	)
 end)
 
-H.case("Section 1c5: the default takeover port, held, is named with its fix", function()
-	local port = held_port("127.0.0.1", 8421)
-	mp.setup({ instance_mode = "takeover", port = 0 })
-	H.defer(function()
-		mp.setup({ instance_mode = "multi", port = 18421 })
+for _, holder in ipairs({ "this process", "another process" }) do
+	H.case("Section 1c5: the default takeover port, held by " .. holder .. ", is named with its fix", function()
+		if holder == "another process" then
+			local said = child_holding("127.0.0.1", 8421)
+			ok(
+				said:find("listening", 1, true) or said:find("EADDRINUSE: address already in use", 1, true),
+				"the child holds the port or finds it held: " .. said
+			)
+		end
+		local port = held_port("127.0.0.1", 8421)
+		mp.setup({ instance_mode = "takeover", port = 0 })
+		H.defer(function()
+			mp.setup({ instance_mode = "multi", port = 18421 })
+		end)
+		local notes = capture_notes()
+		mp.start()
+		eq(#notes, 1, "one notice for the failed start")
+		eq(
+			notes[1] and notes[1].msg,
+			("Markdown Preview: port %d is in use by another program. Set port to a free one in setup(), "):format(port)
+				.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.',
+			"the notice names the port the start asked for"
+		)
+		eq(mp._server_instance, nil, "no server instance is kept")
 	end)
-	local notes = capture_notes()
-	mp.start()
-	eq(#notes, 1, "one notice for the failed start")
-	eq(
-		notes[1] and notes[1].msg,
-		("Markdown Preview: port %d is in use by another program. Set port to a free one in setup(), "):format(port)
-			.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.',
-		"the notice names the port the start asked for"
-	)
-	eq(mp._server_instance, nil, "no server instance is kept")
-end)
+end
 
 H.case("Section 1c6: a host spelled like the error name keeps the generic notice", function()
 	mp.setup({ host = "EADDRINUSE" })
