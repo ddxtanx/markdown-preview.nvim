@@ -634,6 +634,17 @@ local function browser_url(shown, port, bind_host)
 	return base
 end
 
+-- Opens url once the page can load. The URL is taken when the open is
+-- scheduled, and a stop in the meantime took the server it names.
+local function open_later(url)
+	local inst = M._server_instance
+	vim.defer_fn(function()
+		if M._server_instance == inst then
+			util.open_in_browser(url, M.config.browser)
+		end
+	end, 200)
+end
+
 -- What a stop and a failed start both drop: the autocmds, the token, the
 -- workspace pointer, a takeover role, a secondary's included, and the lock
 -- this instance wrote, never one another instance holds.
@@ -861,17 +872,13 @@ function M.start()
 		M._is_primary = true
 		M._takeover_port = nil
 
+		local url = browser_url(display_host(M._bound_host), inst.port, M._bound_host)
 		if type(M.config.hooks.on_start) == "function" then
-			M.config.hooks.on_start(browser_url(display_host(M._bound_host), inst.port, M._bound_host))
+			M.config.hooks.on_start(url)
 		end
 
 		if M.config.open_browser then
-			vim.defer_fn(function()
-				util.open_in_browser(
-					browser_url(display_host(M._bound_host), inst.port, M._bound_host),
-					M.config.browser
-				)
-			end, 200)
+			open_later(url)
 		end
 	else
 		-- Server already running, retarget to this buffer's workspace
@@ -926,18 +933,14 @@ function M.start()
 		end
 		report_push("reload the preview", pcall(ls_server.reload, M._server_instance, M.config.content_name))
 
+		local url = browser_url(display_host(M._bound_host), inst.port, M._bound_host)
 		if type(M.config.hooks.on_start) == "function" then
-			M.config.hooks.on_start(browser_url(display_host(M._bound_host), M._server_instance.port, M._bound_host))
+			M.config.hooks.on_start(url)
 		end
 
 		-- No browser tab connected (user closed it)? Re-open.
-		if M.config.open_browser and ls_server.connected_client_count(M._server_instance) == 0 then
-			vim.defer_fn(function()
-				util.open_in_browser(
-					browser_url(display_host(M._bound_host), M._server_instance.port, M._bound_host),
-					M.config.browser
-				)
-			end, 200)
+		if M.config.open_browser and ls_server.connected_client_count(inst) == 0 then
+			open_later(url)
 		end
 	end
 end

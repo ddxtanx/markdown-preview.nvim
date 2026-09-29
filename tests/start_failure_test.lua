@@ -983,4 +983,32 @@ H.case("Section 8c: a scroll push the primary accepts says nothing", function()
 end)
 calls.start, calls.stop = 0, 0
 
+H.case("Section 9: a stop before the deferred browser open leaves nothing to open", function()
+	local util = require("markdown_preview.util")
+	local opened, real_open = 0, util.open_in_browser
+	util.open_in_browser = function()
+		opened = opened + 1
+	end
+	H.defer(function()
+		util.open_in_browser = real_open
+	end)
+	mp.setup({ open_browser = true, port = free_port() })
+	H.defer(function()
+		mp.setup({ open_browser = false, port = 18421 })
+	end)
+	local errors_before = #H.errors()
+	vim.cmd("buffer " .. first_buf)
+	mp.start()
+	vim.cmd("buffer " .. second_buf)
+	mp.start()
+	mp.stop()
+	vim.wait(500, function()
+		return false
+	end)
+	local raised = vim.list_slice(H.errors(), errors_before + 1)
+	eq(#raised, 0, "no error when the opens fire: " .. table.concat(raised, " | "))
+	eq(opened, 0, "no browser is opened for a stopped server")
+end)
+calls.start, calls.stop = 0, 0
+
 H.finish()
