@@ -1474,4 +1474,57 @@ H.case("Section 16: a write's temporary file is never served", function()
 end)
 calls.start, calls.stop = 0, 0
 
+H.case("Section 17: a write keeps what its target was", function()
+	local util = require("markdown_preview.util")
+	local dir = H.tmpdir()
+	local function mode(p)
+		local st = vim.uv.fs_stat(p)
+		return st and ("%o"):format(st.mode % 512) or "missing"
+	end
+	if vim.fn.has("win32") == 1 then
+		H.skip("a 0600 target stays 0600 (no POSIX mode bits on Windows)")
+		H.skip("a write through a link lands in the file it names (links need a privilege on Windows)")
+		H.skip("the link stays a link (links need a privilege on Windows)")
+	else
+		local private = vim.fs.joinpath(dir, "private.md")
+		H.write_file(private, "old")
+		vim.uv.fs_chmod(private, 384)
+		util.write_text(private, "new")
+		eq(mode(private), "600", "a 0600 target stays 0600")
+		local target = vim.fs.joinpath(dir, "target.md")
+		local link = vim.fs.joinpath(dir, "link.md")
+		H.write_file(target, "old")
+		local linked, link_err = vim.uv.fs_symlink(target, link)
+		if not linked then
+			error("Section 17: " .. tostring(link_err), 0)
+		end
+		util.write_text(link, "through the link")
+		eq(vim.fn.readblob(target), "through the link", "a write through a link lands in the file it names")
+		local lst = vim.uv.fs_lstat(link)
+		eq(lst and lst.type, "link", "the link stays a link")
+	end
+	local whole = vim.fs.joinpath(dir, "whole.md")
+	H.write_file(whole, "the whole old text")
+	local real_write = vim.uv.fs_write
+	vim.uv.fs_write = function(fd, data, ...)
+		if data == "the new text" then
+			real_write(fd, data:sub(1, 3), ...)
+			return 3
+		end
+		return real_write(fd, data, ...)
+	end
+	local wrote, write_err = pcall(util.write_text, whole, "the new text")
+	vim.uv.fs_write = real_write
+	ok(not wrote and tostring(write_err):find("short write", 1, true), "a short write raises: " .. tostring(write_err))
+	eq(vim.fn.readblob(whole), "the whole old text", "and leaves the target whole")
+	local left = {}
+	for name in vim.fs.dir(dir) do
+		if name:find("%.tmp$") then
+			table.insert(left, name)
+		end
+	end
+	eq(table.concat(left, ", "), "", "no temporary file remains")
+end)
+calls.start, calls.stop = 0, 0
+
 H.finish()

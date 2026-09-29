@@ -24,6 +24,16 @@ end
 -- A rename, never a truncating open: a failed write must not empty a file being served.
 function M.write_text(path, text)
 	M.mkdirp(dirname(path))
+	-- A rename over a link would replace the link, so the write goes to the file it names.
+	local lst = vim.uv.fs_lstat(path)
+	if lst and lst.type == "link" then
+		local real, real_err = vim.uv.fs_realpath(path)
+		if not real then
+			error(tostring(real_err), 0)
+		end
+		path = real
+	end
+	local target = vim.uv.fs_stat(path)
 	-- Dot-named, so live-server neither serves nor watches it while it exists.
 	local tmp = vim.fs.joinpath(vim.fs.dirname(path), (".%s.%d.tmp"):format(vim.fs.basename(path), vim.uv.os_getpid()))
 	local function fail(err)
@@ -45,6 +55,13 @@ function M.write_text(path, text)
 	local closed, close_err = vim.uv.fs_close(fd)
 	if not closed then
 		fail(close_err)
+	end
+	-- The rename would give the target the temporary's mode, a 0600 file 0644.
+	if target then
+		local kept, chmod_err = vim.uv.fs_chmod(tmp, target.mode % 4096)
+		if not kept then
+			fail(chmod_err)
+		end
 	end
 	local renamed, rename_err = vim.uv.fs_rename(tmp, path)
 	if not renamed then
