@@ -251,7 +251,15 @@ test("renders the buffer and follows an edit through the plugin's autocmds and S
       });
     expect(await page!.locator("#content p").count()).toBe(2);
     const reloads: string[] = await within(5_000, "reading the reloads", page!.evaluate(() => (window as any).__reloads));
-    if (!reloads.some((d) => /"path":"content\.md"/.test(d))) {
+    // Decoded, since the payload's escaping is the JSON library's (0.10 writes a slash as \/).
+    const pushed = reloads.some((d) => {
+      try {
+        return JSON.parse(d)?.path === "content.md";
+      } catch {
+        return false;
+      }
+    });
+    if (!pushed) {
       throw new Error(`the plugin's own reload push never reached the page; reloads seen: ${JSON.stringify(reloads)}`);
     }
     // A CDN library that failed to load, or answered 400 and up (a 503 on a
