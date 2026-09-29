@@ -117,6 +117,7 @@ M._is_primary = nil -- true/false/nil (takeover mode)
 M._takeover_port = nil -- port of primary server (secondary uses for HTTP events)
 M._token = nil -- live-server auth token (primary owns; secondaries read from lockfile)
 M._bound_host = nil -- the address the primary's server bound, as live-server reports it
+M._lock_owned = nil -- true once this instance writes the takeover lock
 
 local function effective_port()
 	if M.config.port ~= 0 then
@@ -610,11 +611,16 @@ local function browser_url(shown, port, bind_host)
 end
 
 -- What a stop and a failed start both drop: the autocmds, the token, the
--- workspace pointer and a takeover role, a secondary's included.
+-- workspace pointer, a takeover role, a secondary's included, and the lock
+-- this instance wrote, never one another instance holds.
 local function forget_session()
 	if M._augroup then
 		pcall(vim.api.nvim_del_augroup_by_id, M._augroup)
 		M._augroup = nil
+	end
+	if M._lock_owned then
+		M._lock_owned = nil
+		require("markdown_preview.lock").remove()
 	end
 	M._workspace_dir = nil
 	M._last_scroll_line = nil
@@ -680,8 +686,9 @@ function M.start()
 			end
 			return
 		end
-		-- Stale lock or no lock, we become primary
-		lock.remove()
+		-- Stale lock or no lock, we become primary. A lock is left for the
+		-- write that follows a start: a probe that timed out reads a live
+		-- primary as gone, and this start then fails on its port.
 	end
 
 	-- Primary path (takeover) or single-instance (multi). Generate a token
@@ -691,14 +698,12 @@ function M.start()
 	end
 
 	-- A running server keeps serving the last buffer until it accepts the
-	-- new root, so a retarget writes nothing before that answer.
+	-- new root, and a fresh start may share its workspace with another
+	-- instance's server, so nothing is written before a server answers.
 	local function publish()
 		write_index_if_needed(dir)
 		write_content(dir, text, bufnr)
 		M._last_text_by_buf[bufnr] = text
-	end
-	if not M._server_instance then
-		publish()
 	end
 
 	-- Patterns matching workspace-served files that require ?t=<token>.
@@ -785,18 +790,18 @@ function M.start()
 		-- live-server reports canonical ("localhost" binds 127.0.0.1), not a
 		-- host a setup() may have changed since.
 		M._bound_host = inst.host or asked_host
-		-- The index went out before the bound address was known.
-		write_index_if_needed(dir)
+		publish()
 		-- The lock names the port the server got, so it is written once the
 		-- server listens. A lock that cannot be made private stops the server
 		-- again and fails the start as a busy port does: a primary without
 		-- its lock left a listening server, a raw Lua error and no browser.
 		if M.config.instance_mode == "takeover" then
-			local lock = require("markdown_preview.lock")
-			local locked, lock_err = pcall(lock.write, inst.port, dir, M._token, M._bound_host)
+			-- Owned from the write on: a write that fails may leave the file it opened.
+			M._lock_owned = true
+			local locked, lock_err =
+				pcall(require("markdown_preview.lock").write, inst.port, dir, M._token, M._bound_host)
 			if not locked then
 				pcall(ls_server.stop, inst)
-				lock.remove()
 				forget_session()
 				vim.notify(
 					("Markdown Preview: failed to start server (port %s): %s"):format(
@@ -877,9 +882,6 @@ function M.stop()
 	if M._server_instance then
 		pcall(ls_server.stop, M._server_instance)
 		M._server_instance = nil
-	end
-	if M._is_primary then
-		require("markdown_preview.lock").remove()
 	end
 	forget_session()
 

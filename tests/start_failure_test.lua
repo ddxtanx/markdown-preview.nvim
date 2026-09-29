@@ -12,7 +12,7 @@
 
 local H = dofile(vim.fs.joinpath(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)), "helpers.lua"))
 H.isolate()
-H.rtp()
+local ls_dir = H.rtp()
 
 local ls_server = require("live_server.server")
 local eq, ok = H.eq, H.ok
@@ -550,5 +550,103 @@ H.case("Section 5: a restart syncs the line the cursor already holds", function(
 	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = first_buf })
 	eq(scrolls, 1, "the first cursor event after a restart sends the scroll")
 end)
+
+-- A second Neovim serving path as the takeover primary on port, in this
+-- process's cache, until the enclosing case ends; it exits by itself after
+-- 30 s if the kill is missed. Returns what it reports: its token and port.
+local function child_primary(path, port)
+	local script = vim.fs.joinpath(H.tmpdir(), "primary.lua")
+	H.write_file(
+		script,
+		([=[
+vim.opt.runtimepath:prepend(%q)
+vim.opt.runtimepath:prepend(%q)
+local mp = require("markdown_preview")
+mp.setup({ open_browser = false, instance_mode = "takeover", port = %d })
+vim.cmd("edit " .. vim.fn.fnameescape(%q))
+vim.bo.filetype = "markdown"
+mp.start()
+local inst = mp._server_instance
+io.stdout:write(vim.json.encode({ token = mp._token or "", port = inst and inst.port or 0 }) .. "\n")
+io.stdout:flush()
+vim.wait(30000, function() return false end)
+]=]):format(ls_dir, H.root, port, path)
+	)
+	local said = {}
+	local proc = vim.system({ vim.v.progpath, "--headless", "-u", "NONE", "-l", script }, {
+		stdout = function(_, data)
+			if data then
+				table.insert(said, data)
+			end
+		end,
+	})
+	H.defer(function()
+		proc:kill(9)
+		proc:wait(5000)
+	end)
+	if not H.wait_for(function()
+		return table.concat(said):find("\n", 1, true) ~= nil
+	end, 10000) then
+		error("child_primary: the child said nothing in 10 s", 0)
+	end
+	local line = table.concat(said):match("({.-})")
+	local decoded, got = pcall(vim.json.decode, line or "")
+	if not decoded or type(got) ~= "table" or got.port ~= port then
+		error("child_primary: the child did not serve port " .. port .. ": " .. table.concat(said), 0)
+	end
+	return got
+end
+
+H.case("Section 6: a refused start leaves a running preview's files and lock alone", function()
+	local lock = require("markdown_preview.lock")
+	local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
+	H.defer(lock.remove)
+	-- The lock's bytes, or a word that says it is gone.
+	local function lock_bytes()
+		return vim.uv.fs_stat(lock_file) and vim.fn.readblob(lock_file) or "(no lock)"
+	end
+	local a_md = vim.fs.joinpath(tmpdir, "a.md")
+	H.write_file(a_md, "# served by the primary\n")
+	local port = free_port()
+	local primary = child_primary(a_md, port)
+	local held = lock_bytes()
+	ok(held:find(primary.token, 1, true) ~= nil, "the primary's lock holds its token")
+	-- A probe that timed out, as a starved machine's did: this instance
+	-- reads the live primary as gone and starts a server of its own.
+	local real_alive = lock.is_server_alive
+	lock.is_server_alive = function()
+		return false
+	end
+	H.defer(function()
+		lock.is_server_alive = real_alive
+	end)
+	local b_md = vim.fs.joinpath(tmpdir, "b.md")
+	H.write_file(b_md, "# this instance's buffer\n")
+	vim.cmd("edit " .. vim.fn.fnameescape(b_md))
+	vim.bo.filetype = "markdown"
+	mp.setup({ instance_mode = "takeover", port = port })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", port = 18421 })
+	end)
+	local notes = capture_notes()
+	mp.start()
+	eq(#notes, 1, "one notice for the refused start")
+	eq(mp._server_instance, nil, "no server instance is kept")
+	local content = H.http_get(("http://127.0.0.1:%d/content.md?t=%s"):format(port, primary.token))
+	ok(
+		content.status == 200 and content.body:find("# served by the primary", 1, true) ~= nil,
+		("the primary still serves its own buffer: %d %s"):format(content.status, content.body)
+	)
+	local index = H.http_get(("http://127.0.0.1:%d/"):format(port))
+	eq(
+		index.body:match('data%-live%-token="([^"]*)"'),
+		primary.token,
+		"the primary's index still bakes the primary's token"
+	)
+	eq(lock_bytes(), held, "the refused start leaves the primary's lock")
+	mp.stop()
+	eq(lock_bytes(), held, "a stop after the refused start leaves the primary's lock")
+end)
+calls.start, calls.stop = 0, 0
 
 H.finish()

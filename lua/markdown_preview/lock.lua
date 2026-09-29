@@ -46,9 +46,9 @@ function M.write(port, workspace, token, host)
 	-- Mode 0600 (decimal 384) so the token isn't world-readable on multi-user
 	-- systems. The open applies the mode only when it creates the file (a
 	-- direct call on an existing 0644 file kept that mode through the
-	-- truncate, measured; start() removes the lock first, so it never meets
-	-- one); fchmod makes the file private before the token is written, and a
-	-- file that cannot be made private gets no token.
+	-- truncate, measured, and a primary writes over a stale lock); fchmod
+	-- makes the file private before the token is written, and a file that
+	-- cannot be made private gets no token.
 	local fd = assert(uv.fs_open(path, "w", 384))
 	local private, chmod_err = uv.fs_fchmod(fd, 384)
 	if not private then
