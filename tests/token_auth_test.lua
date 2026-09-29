@@ -310,4 +310,60 @@ else
 	H.skip("a ::1 bind bakes no token into its index (no IPv6 loopback here)")
 end
 
+-- On a loopback bind the index carries the token, so the URL does not;
+-- a network bind's page has no other source.
+local loop_url = url_for("127.0.0.1")
+ok(loop_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil, "a loopback bind's URL has no ?t=: " .. loop_url)
+local net_url = url_for("0.0.0.0")
+ok(net_url:find("?t=", 1, true) ~= nil, "a network bind's URL keeps ?t=: " .. net_url)
+-- The tokenless URL still opens a page whose stream authenticates, with the
+-- token the served index hands the page.
+local opened
+mp.setup({
+	open_browser = false,
+	instance_mode = "multi",
+	port = 0,
+	host = "127.0.0.1",
+	hooks = {
+		on_start = function(u)
+			opened = u
+		end,
+	},
+})
+mp.start()
+opened = opened or ""
+local open_port = tonumber(opened:match("^http://127%.0%.0%.1:(%d+)/")) or 0
+local page = http_get(opened)
+local handed = page.body:match('data%-live%-token="([^"]*)"') or ""
+local stream_status = 0
+if open_port > 0 and handed ~= "" then
+	local c, cerr = H.raw_connect(open_port)
+	if c then
+		local sent, serr =
+			c:send(("GET /__live/events?t=%s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n\r\n"):format(handed, open_port))
+		if sent then
+			local head = c:read(3000, function(b)
+				return b:find("\r\n\r\n", 1, true) ~= nil
+			end)
+			local first = H.responses(head)[1]
+			stream_status = first and first.status or 0
+		else
+			H.write_line("send failed: " .. tostring(serr))
+		end
+		c:close()
+	else
+		H.write_line("connect failed: " .. tostring(cerr))
+	end
+end
+mp.stop()
+ok(
+	not opened:find("t=", 1, true) and page.status == 200 and handed ~= "" and stream_status == 200,
+	("the tokenless URL opens a page whose stream takes the token its index hands it: %s, %d, %s, %d"):format(
+		opened,
+		page.status,
+		handed ~= "" and "token baked" or "no token baked",
+		stream_status
+	)
+)
+
 H.finish()

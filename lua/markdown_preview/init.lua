@@ -569,8 +569,8 @@ local function lan_ip()
 	return (addr and addr.ip) or "127.0.0.1"
 end
 
--- Build the URL the browser opens to. Embeds the auth token when one exists
--- so the first request includes it (the page then stashes it in
+-- Build the URL the browser opens to. On a network bind it embeds the auth
+-- token so the first request includes it (the page then stashes it in
 -- sessionStorage for refreshes).
 local function browser_url(port)
 	-- 0.0.0.0 shows the LAN address a remote browser reaches, which no probe checks.
@@ -584,7 +584,10 @@ local function browser_url(port)
 		display_host = "[" .. display_host .. "]"
 	end
 	local base = ("http://%s:%d/"):format(display_host, port)
-	if M._token and M._token ~= "" then
+	-- On a loopback bind the index carries the token (data-live-token), so
+	-- the URL leaves it out of history, the address bar and a shared
+	-- screen; a network bind's page has no other way to get it.
+	if M._token and M._token ~= "" and not host_is_loopback() then
 		return base .. "?t=" .. M._token
 	end
 	return base
