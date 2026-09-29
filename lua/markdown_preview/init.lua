@@ -723,11 +723,21 @@ function M.start()
 			M._is_primary = false
 			M._takeover_port = lock_data.port
 			M._token = lock_data.token
-			write_content(dir, text, bufnr)
-			M._last_text_by_buf[bufnr] = text
-			set_autocmds_for_buffer(bufnr)
-			if type(M.config.hooks.on_start) == "function" then
-				M.config.hooks.on_start(browser_url("127.0.0.1", lock_data.port, lock_data.host))
+			-- A raise after the role is taken would leave a half-joined session.
+			local joined, join_err = pcall(function()
+				write_content(dir, text, bufnr)
+				M._last_text_by_buf[bufnr] = text
+				set_autocmds_for_buffer(bufnr)
+				if type(M.config.hooks.on_start) == "function" then
+					M.config.hooks.on_start(browser_url("127.0.0.1", lock_data.port, lock_data.host))
+				end
+			end)
+			if not joined then
+				forget_session()
+				vim.notify(
+					"Markdown Preview: could not join the running preview: " .. tostring(join_err),
+					vim.log.levels.ERROR
+				)
 			end
 			return
 		end

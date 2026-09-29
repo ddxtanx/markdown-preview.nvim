@@ -1034,4 +1034,62 @@ H.case("Section 10: takeover refuses a host other than 127.0.0.1, localhost and 
 end)
 calls.start, calls.stop = 0, 0
 
+-- Makes the next start read a live primary on port until the case ends.
+local function primary_answers_on(port)
+	local lock = require("markdown_preview.lock")
+	local real_read, real_alive = lock.read, lock.is_server_alive
+	H.defer(function()
+		lock.read, lock.is_server_alive = real_read, real_alive
+	end)
+	lock.read = function()
+		return { port = port, token = "peer", host = "127.0.0.1" }
+	end
+	lock.is_server_alive = function()
+		return true
+	end
+end
+
+-- The session a secondary must not keep after a join that failed.
+local function nothing_joined(buf)
+	eq(mp._is_primary, nil, "no role is kept")
+	eq(mp._takeover_port, nil, "no takeover port is kept")
+	eq(mp._token, nil, "the primary's token is not kept")
+	eq(mp._workspace_dir, nil, "no workspace pointer is kept")
+	eq(armed_on(buf), 0, "no autocmd is armed")
+end
+
+H.case("Section 11: a secondary whose autocmds cannot be armed joins nothing", function()
+	primary_answers_on(free_port())
+	mp.setup({ instance_mode = "takeover", port = free_port(), auto_refresh_events = { "NoSuchEvent" } })
+	H.defer(function()
+		mp.setup({
+			instance_mode = "multi",
+			port = 18421,
+			auto_refresh_events = { "InsertLeave", "TextChanged", "TextChangedI", "BufWritePost" },
+		})
+	end)
+	vim.cmd("buffer " .. first_buf)
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	one_clean_error(notes, "Markdown Preview: could not join the running preview: auto_refresh_events:")
+	nothing_joined(first_buf)
+end)
+
+H.case("Section 11b: a secondary whose content cannot be written joins nothing", function()
+	primary_answers_on(free_port())
+	mp.setup({ instance_mode = "takeover", port = free_port() })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", port = 18421 })
+	end)
+	refuse_write("content.md")
+	vim.cmd("buffer " .. first_buf)
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	one_clean_error(notes, "Markdown Preview: could not join the running preview: ENOSPC")
+	nothing_joined(first_buf)
+end)
+calls.start, calls.stop = 0, 0
+
 H.finish()
