@@ -254,4 +254,38 @@ eq(r.curl_exit, 7, "the port refuses connections: no server is left")
 ok(uv.fs_stat(lock_file) == nil, "no lock is left")
 mp.stop()
 
+H.section("Section 6: the preview URL")
+-- The URL on_start receives for a start on host; "" when none came.
+local function url_for(host)
+	local url
+	mp.setup({
+		open_browser = false,
+		instance_mode = "multi",
+		port = 0,
+		host = host,
+		hooks = {
+			on_start = function(u)
+				url = u
+			end,
+		},
+	})
+	mp.start()
+	mp.stop()
+	return url or ""
+end
+-- An IPv6 literal takes brackets, or its colons read as the port.
+local probe = uv.new_tcp()
+local v6 = probe:bind("::1", 0)
+probe:close()
+if v6 then
+	local v6_url = url_for("::1")
+	ok(v6_url:match("^http://%[::1%]:%d+/") ~= nil, "an IPv6 loopback bind yields http://[::1]:<port>/: " .. v6_url)
+	-- The IPv6 wildcard shows its loopback, as live-server's own URL does.
+	local any_url = url_for("::")
+	ok(any_url:match("^http://%[::1%]:%d+/") ~= nil, "an IPv6 wildcard bind yields http://[::1]:<port>/: " .. any_url)
+else
+	H.skip("an IPv6 loopback bind yields http://[::1]:<port>/ (no IPv6 loopback here)")
+	H.skip("an IPv6 wildcard bind yields http://[::1]:<port>/ (no IPv6 loopback here)")
+end
+
 H.finish()

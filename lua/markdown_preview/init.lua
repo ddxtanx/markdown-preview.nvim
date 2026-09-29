@@ -573,7 +573,16 @@ end
 -- so the first request includes it (the page then stashes it in
 -- sessionStorage for refreshes).
 local function browser_url(port)
+	-- The LAN address shown for 0.0.0.0 is one live-server's probe never checks.
 	local display_host = (M.config.host == "0.0.0.0") and lan_ip() or M.config.host
+	-- The IPv6 wildcard shows its loopback, as live-server's own URL does.
+	if display_host == "::" then
+		display_host = "::1"
+	end
+	-- An IPv6 literal takes brackets in a URL, or its colons read as the port.
+	if display_host:find(":", 1, true) then
+		display_host = "[" .. display_host .. "]"
+	end
 	local base = ("http://%s:%d/"):format(display_host, port)
 	if M._token and M._token ~= "" then
 		return base .. "?t=" .. M._token

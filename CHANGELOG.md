@@ -24,6 +24,7 @@ All notable changes to this project; versions follow SemVer. From `[Unreleased]`
 - A takeover-mode lock file that cannot be made private fails the start with the start-failure notification; before, the server stayed running with an empty lock and the start raised a Lua error.
 - A preview that fails to start (a taken port, an address live-server cannot bind, a lock file that cannot be made private) keeps no autocmds, no session token and no workspace pointer, and drops a takeover role it held as a secondary; before, six autocmds kept refreshing a preview that did not exist.
 - When live-server refuses to switch the preview to another buffer, the notice reads `Markdown Preview: could not retarget: <reason>` and the preview keeps showing the buffer it showed, its text and images included. When the server reports live reload off after a switch, a warning says so. A reload or scroll update live-server refuses is reported once per preview server. Before, all three went unreported.
+- An IPv6 `host` such as `"::1"` gives a preview URL in brackets, `http://[::1]:8421/`, which browsers open. The IPv6 wildcard `"::"` shows `http://[::1]:8421/`, as live-server.nvim does.
 
 ### Security
 
