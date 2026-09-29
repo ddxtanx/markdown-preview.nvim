@@ -1036,12 +1036,17 @@ H.case("Section 8b: a scroll push nothing answers is told once", function()
 end)
 
 H.case("Section 8f: a foreign answer reaches the notice short and printable", function()
-	local notes = secondary_push_notes(stub_primary("HTTP/1.1 418 " .. ("x"):rep(200) .. "\27[31m"))
+	-- One ESC inside the first 64 bytes, another past them.
+	local answer = "HTTP/1.1 418 \27[31mred" .. ("x"):rep(200) .. "\27[0m"
+	local notes = secondary_push_notes(stub_primary(answer))
 	eq(#notes, 1, "one notice for two foreign answers")
 	local msg = notes[1] and notes[1].msg or ""
 	local shown = msg:match("the primary answered (.*)$") or ""
-	ok(#shown > 0 and #shown <= 64, ("the answer shown is at most 64 bytes: %d"):format(#shown))
-	ok(not shown:find("[^\32-\126]"), "the answer shown is printable: " .. vim.inspect(shown))
+	eq(
+		shown,
+		("HTTP/1.1 418 ?[31mred" .. ("x"):rep(200)):sub(1, 64),
+		"the answer shown is its first 64 bytes, each unprintable one a ?"
+	)
 end)
 
 H.case("Section 8c: a scroll push the primary accepts says nothing", function()

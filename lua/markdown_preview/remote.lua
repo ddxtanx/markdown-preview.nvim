@@ -73,8 +73,8 @@ function M.send_event(port, event_type, json_data, token, on_done)
 			if status and status:sub(1, 1) == "2" then
 				finish(true)
 			else
-				-- Whatever holds the port writes this line, so the notice gets 64 printable bytes.
-				finish(false, "the primary answered " .. line:gsub("[^\32-\126]", ""):sub(1, 64))
+				-- Whatever holds the port writes this line: 64 bytes, each unprintable one marked.
+				finish(false, "the primary answered " .. line:sub(1, 64):gsub("[^\32-\126]", "?"))
 			end
 		end)
 		if not reading then
