@@ -213,6 +213,10 @@ local second_buf = vim.api.nvim_get_current_buf()
 mp.start()
 local second_ws = mp._workspace_dir
 ok(armed_on(second_buf) > 0, "a retarget arms them on the new buffer")
+local second_text = vim.uv.fs_stat(vim.fs.joinpath(second_ws, "content.md"))
+	and vim.fn.readblob(vim.fs.joinpath(second_ws, "content.md"))
+ok(second_text and second_text:find("# second", 1, true), "an accepted retarget writes the new buffer's text")
+ok(vim.uv.fs_stat(vim.fs.joinpath(second_ws, "index.html")), "an accepted retarget writes the index")
 mp.stop()
 calls.start, calls.stop = 0, 0
 
