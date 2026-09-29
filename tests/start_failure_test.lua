@@ -117,28 +117,51 @@ eq(mp._server_instance, nil, "no server instance is kept")
 eq(calls.start, 0, "on_start is not called")
 eq(calls.stop, 0, "on_stop is not called")
 
-H.section("Section 1b: a lock that cannot be written leaves no state behind")
--- The takeover lock is written once the server listens; a lock that
--- cannot be made private stops the server again and fails the start.
-local probe = vim.uv.new_tcp()
-probe:bind("127.0.0.1", 0)
-local free = probe:getsockname().port
-probe:close()
-mp.setup({ instance_mode = "takeover", port = free })
-local lock = require("markdown_preview.lock")
-local real_write, real_notify_1b = lock.write, vim.notify
-lock.write = function()
-	error("stubbed: the lockfile cannot be made private", 0)
+-- True when a fresh listener can take port again: no server holds it.
+local function port_free(port)
+	local tcp, tcp_err = vim.uv.new_tcp()
+	if not tcp then
+		error("port_free: " .. tostring(tcp_err), 0)
+	end
+	local bound = tcp:bind("127.0.0.1", port)
+	local listening = bound and tcp:listen(8, function() end)
+	tcp:close()
+	return listening == 0
 end
-vim.notify = function() end
-mp.start()
-lock.write, vim.notify = real_write, real_notify_1b
-eq(armed(), 0, "no autocmd is armed after a lock failure")
-eq(mp._token, nil, "the token is cleared")
-eq(mp._workspace_dir, nil, "the workspace is cleared")
-eq(mp._server_instance, nil, "no server instance is kept")
-eq(calls.start, 0, "on_start is not called")
-mp.setup({ instance_mode = "multi", port = 18421 })
+
+H.case("Section 1b: a lock that cannot be written leaves no state behind", function()
+	-- The takeover lock is written once the server listens; a lock that
+	-- cannot be made private stops the server again and fails the start.
+	local probe = vim.uv.new_tcp()
+	probe:bind("127.0.0.1", 0)
+	local free = probe:getsockname().port
+	probe:close()
+	mp.setup({ instance_mode = "takeover", port = free })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", port = 18421 })
+	end)
+	local lock = require("markdown_preview.lock")
+	local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
+	local real_write = lock.write
+	-- A real write opens the file before fchmod refuses it.
+	lock.write = function()
+		H.write_file(lock_file, "")
+		error("stubbed: the lockfile cannot be made private", 0)
+	end
+	H.defer(function()
+		lock.write = real_write
+	end)
+	capture_notes()
+	mp.start()
+	eq(armed(), 0, "no autocmd is armed after a lock failure")
+	eq(mp._token, nil, "the token is cleared")
+	eq(mp._workspace_dir, nil, "the workspace is cleared")
+	eq(mp._server_instance, nil, "no server instance is kept")
+	eq(calls.start, 0, "on_start is not called")
+	-- An orphaned listener would serve the preview, token and all.
+	ok(port_free(free), "the server is stopped: its port binds again")
+	eq(vim.uv.fs_stat(lock_file), nil, "the lock file the write opened is removed")
+end)
 
 -- A port no listener holds, for a start that must succeed.
 local function free_port()
@@ -663,18 +686,6 @@ local function refuse_write(suffix)
 	H.defer(function()
 		vim.uv.fs_open = real_open
 	end)
-end
-
--- True when a fresh listener can take port again: no server holds it.
-local function port_free(port)
-	local tcp, tcp_err = vim.uv.new_tcp()
-	if not tcp then
-		error("port_free: " .. tostring(tcp_err), 0)
-	end
-	local bound = tcp:bind("127.0.0.1", port)
-	local listening = bound and tcp:listen(8, function() end)
-	tcp:close()
-	return listening == 0
 end
 
 -- One error notice whose text carries no Lua position or source path.
