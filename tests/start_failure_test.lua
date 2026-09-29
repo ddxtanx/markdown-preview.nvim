@@ -1571,19 +1571,25 @@ for _, shape in ipairs({
 		if skipped_without_raise("18, " .. shape.what, rows) then
 			return
 		end
-		-- Bound and never listening: it holds the port and refuses every connect.
-		local holder, holder_err = vim.uv.new_tcp()
-		if not holder then
-			error("Section 18: " .. tostring(holder_err), 0)
+		-- Another port's lock meets a holder that answers; a stale lock's holder
+		-- is bound and never listening, so it holds the port and refuses a connect.
+		local port
+		if shape.other then
+			port = held_port("127.0.0.1")
+		else
+			local holder, holder_err = vim.uv.new_tcp()
+			if not holder then
+				error("Section 18: " .. tostring(holder_err), 0)
+			end
+			H.defer(function()
+				holder:close()
+			end)
+			local bound, bind_err = holder:bind("127.0.0.1", 0)
+			if not bound then
+				error("Section 18: " .. tostring(bind_err), 0)
+			end
+			port = holder:getsockname().port
 		end
-		H.defer(function()
-			holder:close()
-		end)
-		local bound, bind_err = holder:bind("127.0.0.1", 0)
-		if not bound then
-			error("Section 18: " .. tostring(bind_err), 0)
-		end
-		local port = holder:getsockname().port
 		local lock = require("markdown_preview.lock")
 		local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
 		vim.fn.mkdir(vim.fs.dirname(lock_file), "p")
