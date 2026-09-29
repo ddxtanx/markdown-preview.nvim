@@ -28,14 +28,22 @@ function M.write_text(path, text)
 	local lst = vim.uv.fs_lstat(path)
 	if lst and lst.type == "link" then
 		local real, real_err = vim.uv.fs_realpath(path)
-		if not real then
-			-- A dangling link: the old truncating open created the file it names.
+		-- A dangling chain: the old truncating open created the file it ends at.
+		local hops = 0
+		while not real do
 			local named, named_err = vim.uv.fs_readlink(path)
 			if not named then
 				error(("%s (%s)"):format(tostring(real_err), tostring(named_err)), 0)
 			end
 			local absolute = named:sub(1, 1) == "/" or named:match("^%a:[/\\]") ~= nil
-			real = absolute and named or vim.fs.joinpath(vim.fs.dirname(path), named)
+			path = absolute and named or vim.fs.joinpath(vim.fs.dirname(path), named)
+			hops = hops + 1
+			local nxt = vim.uv.fs_lstat(path)
+			if not (nxt and nxt.type == "link") then
+				real = path
+			elseif hops >= 40 then
+				error(("%s: too many links"):format(path), 0)
+			end
 		end
 		path = real
 	end
@@ -43,6 +51,10 @@ function M.write_text(path, text)
 	-- Dot-named, so live-server neither serves nor watches it while it exists.
 	local tmp = vim.fs.joinpath(vim.fs.dirname(path), (".%s.%d.tmp"):format(vim.fs.basename(path), vim.uv.os_getpid()))
 	local function fail(err)
+		-- luv names the temporary, which a user never chose: name the target.
+		local text = tostring(err)
+		local at, to = text:find(tmp, 1, true)
+		err = at and (text:sub(1, at - 1) .. path .. text:sub(to + 1)) or text
 		local removed, remove_err = vim.uv.fs_unlink(tmp)
 		if not removed and not tostring(remove_err):find("ENOENT", 1, true) then
 			err = ("%s (and %s is left: %s)"):format(tostring(err), tmp, tostring(remove_err))

@@ -1544,6 +1544,10 @@ H.case("Section 17b: a failed rename and a dangling link", function()
 	if vim.fn.has("win32") == 1 then
 		H.skip("a dangling link's named file is created (links need a privilege on Windows)")
 		H.skip("the dangling link stays a link (links need a privilege on Windows)")
+		H.skip("a dangling link with an absolute target creates that file (links need a privilege on Windows)")
+		H.skip("a dangling chain ends at its last name (links need a privilege on Windows)")
+		H.skip("and the link in the middle stays a link (links need a privilege on Windows)")
+		H.skip("a link into a missing directory raises naming the target (links need a privilege on Windows)")
 		return
 	end
 	local link = vim.fs.joinpath(dir, "dangling.md")
@@ -1561,6 +1565,32 @@ H.case("Section 17b: a failed rename and a dangling link", function()
 	)
 	local lst = vim.uv.fs_lstat(link)
 	eq(lst and lst.type, "link", "the dangling link stays a link")
+	local far = vim.fs.joinpath(H.tmpdir(), "far.md")
+	local abs_link = vim.fs.joinpath(dir, "absolute.md")
+	assert(vim.uv.fs_symlink(far, abs_link))
+	util.write_text(abs_link, "through an absolute link")
+	eq(
+		vim.uv.fs_stat(far) and vim.fn.readblob(far),
+		"through an absolute link",
+		"a dangling link with an absolute target creates that file"
+	)
+	local first = vim.fs.joinpath(dir, "first.md")
+	assert(vim.uv.fs_symlink("second.md", first))
+	assert(vim.uv.fs_symlink("last.md", vim.fs.joinpath(dir, "second.md")))
+	util.write_text(first, "through a chain")
+	local last = vim.fs.joinpath(dir, "last.md")
+	eq(vim.uv.fs_stat(last) and vim.fn.readblob(last), "through a chain", "a dangling chain ends at its last name")
+	local mid = vim.uv.fs_lstat(vim.fs.joinpath(dir, "second.md"))
+	eq(mid and mid.type, "link", "and the link in the middle stays a link")
+	local lost = vim.fs.joinpath(dir, "lost.md")
+	assert(vim.uv.fs_symlink("no/such/dir/x.md", lost))
+	local wrote_lost, lost_err = pcall(util.write_text, lost, "nowhere")
+	ok(
+		not wrote_lost
+			and tostring(lost_err):find("no/such/dir/x.md", 1, true) ~= nil
+			and tostring(lost_err):find("%.tmp") == nil,
+		"a link into a missing directory raises naming the target, not the temporary: " .. tostring(lost_err)
+	)
 end)
 
 H.case("Section 17: a write keeps what its target was", function()
