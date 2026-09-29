@@ -27,6 +27,11 @@ function M.read()
 	if not ok or type(tbl) ~= "table" then
 		return nil
 	end
+	-- The probe and the pushes hand the port to luv, which raises on a non-number.
+	local port = tbl.port
+	if type(port) ~= "number" or port % 1 ~= 0 or port < 1 or port > 65535 then
+		return nil
+	end
 	return tbl
 end
 

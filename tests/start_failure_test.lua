@@ -1092,4 +1092,26 @@ H.case("Section 11b: a secondary whose content cannot be written joins nothing",
 end)
 calls.start, calls.stop = 0, 0
 
+for _, bad in ipairs({ '"x"', "0", "70000", "8421.5", "-1" }) do
+	H.case("Section 11c: a lock whose port is " .. bad .. " reads as no lock", function()
+		local lock = require("markdown_preview.lock")
+		local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
+		vim.fn.mkdir(vim.fs.dirname(lock_file), "p")
+		H.write_file(lock_file, '{"port":' .. bad .. ',"token":"peer","host":"127.0.0.1"}')
+		H.defer(lock.remove)
+		eq(lock.read(), nil, "lock.read() answers no lock")
+		local port = free_port()
+		mp.setup({ instance_mode = "takeover", port = port })
+		H.defer(function()
+			mp.setup({ instance_mode = "multi", port = 18421 })
+		end)
+		vim.cmd("buffer " .. first_buf)
+		local ran, err = pcall(mp.start)
+		H.defer(mp.stop)
+		ok(ran, "start() returns instead of raising: " .. tostring(err))
+		eq(mp._server_instance and mp._server_instance.port, port, "the start serves as the primary")
+	end)
+end
+calls.start, calls.stop = 0, 0
+
 H.finish()
