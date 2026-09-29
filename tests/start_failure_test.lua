@@ -187,10 +187,17 @@ H.case("Section 1c2: any other start failure keeps the generic notice", function
 	)
 end)
 
--- A port another program listens on, for the start to meet the real refusal.
-local function held_port(addr)
-	local tcp = vim.uv.new_tcp()
-	local bound, bind_err = tcp:bind(addr, 0)
+-- A port another program listens on, for the start to meet the real
+-- refusal; port nil or 0 lets the OS choose.
+local function held_port(addr, port)
+	local tcp, tcp_err = vim.uv.new_tcp()
+	if not tcp then
+		error("held_port: " .. tostring(tcp_err), 0)
+	end
+	H.defer(function()
+		tcp:close()
+	end)
+	local bound, bind_err = tcp:bind(addr, port or 0)
 	if not bound then
 		error("held_port: " .. tostring(bind_err), 0)
 	end
@@ -198,11 +205,65 @@ local function held_port(addr)
 	if not listening then
 		error("held_port: " .. tostring(listen_err), 0)
 	end
-	H.defer(function()
-		tcp:close()
-	end)
-	return tcp:getsockname().port
+	local name, name_err = tcp:getsockname()
+	if not name then
+		error("held_port: " .. tostring(name_err), 0)
+	end
+	return name.port
 end
+
+H.case("Section 1c4: an OS-assigned port refused keeps the generic notice", function()
+	mp.setup({ port = 0 })
+	H.defer(function()
+		mp.setup({ port = 18421 })
+	end)
+	local reason = "Failed to bind 127.0.0.1:53211: another socket holds a wildcard on port 53211,"
+		.. " which this address would shadow (EADDRINUSE: address already in use)"
+	local notes = start_raising(reason)
+	eq(#notes, 1, "one notice for the failed start")
+	eq(
+		notes[1] and notes[1].msg,
+		"Markdown Preview: failed to start server (port 0): " .. reason,
+		"the notice carries the reason, which names the port the OS chose"
+	)
+end)
+
+H.case("Section 1c5: the default takeover port, held, is named with its fix", function()
+	local port = held_port("127.0.0.1", 8421)
+	mp.setup({ instance_mode = "takeover", port = 0 })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", port = 18421 })
+	end)
+	local notes = capture_notes()
+	mp.start()
+	eq(#notes, 1, "one notice for the failed start")
+	eq(
+		notes[1] and notes[1].msg,
+		("Markdown Preview: port %d is in use by another program. Set port to a free one in setup(), "):format(port)
+			.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.',
+		"the notice names the port the start asked for"
+	)
+	eq(mp._server_instance, nil, "no server instance is kept")
+end)
+
+H.case("Section 1c6: a host spelled like the error name keeps the generic notice", function()
+	mp.setup({ host = "EADDRINUSE" })
+	H.defer(function()
+		mp.setup({ host = "127.0.0.1" })
+	end)
+	local notes = capture_notes()
+	mp.start()
+	eq(#notes, 1, "one notice for the failed start")
+	ok(
+		notes[1] ~= nil
+			and vim.startswith(
+				notes[1].msg,
+				"Markdown Preview: failed to start server (port 18421): Failed to bind EADDRINUSE:"
+			),
+		"the notice is the generic one: " .. tostring(notes[1] and notes[1].msg)
+	)
+	eq(mp._server_instance, nil, "no server instance is kept")
+end)
 
 for _, shape in ipairs({
 	{ held = "127.0.0.1", host = "127.0.0.1", what = "the same address" },

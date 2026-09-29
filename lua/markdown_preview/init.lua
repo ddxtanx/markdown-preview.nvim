@@ -738,8 +738,8 @@ function M.start()
 			forget_session()
 			local reason = tostring(inst)
 			local msg = ("Markdown Preview: failed to start server (port %s): %s"):format(tostring(port), reason)
-			-- Every refusal live-server gives for a held port carries luv's EADDRINUSE name.
-			if reason:find("EADDRINUSE", 1, true) then
+			-- Every held-port refusal carries luv's text; a port the OS chose is named only in the reason.
+			if port ~= 0 and reason:find("EADDRINUSE: address already in use", 1, true) then
 				msg = (
 					"Markdown Preview: port %s is in use by another program. Set port to a free one in setup(), "
 					.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.'
