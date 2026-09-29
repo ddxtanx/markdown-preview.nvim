@@ -1532,4 +1532,29 @@ H.case("Section 17: a write keeps what its target was", function()
 end)
 calls.start, calls.stop = 0, 0
 
+H.case("Section 14b: a retarget whose workspace cannot be created leaves the running preview", function()
+	mp.setup({ port = free_port() })
+	H.defer(function()
+		mp.config.workspace_dir = nil
+		mp.setup({ port = 18421 })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	mp.start()
+	H.defer(mp.stop)
+	local inst, token, ws = mp._server_instance, mp._token, mp._workspace_dir
+	local blocker = vim.fs.joinpath(tmpdir, "blocker14b")
+	H.write_file(blocker, "a file where the workspace's parent should be\n")
+	mp.setup({ workspace_dir = vim.fs.joinpath(blocker, "ws") })
+	vim.cmd("buffer " .. second_buf)
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	one_clean_error(notes, "Markdown Preview: could not create the workspace ")
+	eq(mp._server_instance, inst, "the running server is kept")
+	eq(mp._token, token, "its token is kept")
+	eq(mp._workspace_dir, ws, "its workspace pointer is kept")
+	ok(armed_on(first_buf) > 0, "the served buffer keeps its autocmds")
+end)
+calls.start, calls.stop = 0, 0
+
 H.finish()
