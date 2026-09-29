@@ -17,6 +17,19 @@ local ls_dir = H.rtp()
 local ls_server = require("live_server.server")
 local eq, ok = H.eq, H.ok
 
+-- A live-server without start_raises returned from a start on a held
+-- port with a server that served nothing, so the rows that need its
+-- refusal are skipped there, one skip per row. True when they were.
+local function skipped_without_raise(rows)
+	if ls_server.features and ls_server.features.start_raises then
+		return false
+	end
+	for _, row in ipairs(rows) do
+		H.skip(row .. " (this live-server lacks features.start_raises: a start on a held port returns)")
+	end
+	return true
+end
+
 local tmpdir = H.tmpdir()
 local md = vim.fs.joinpath(tmpdir, "doc.md")
 H.write_file(md, "# doc\n")
@@ -302,6 +315,15 @@ end)
 
 for _, holder in ipairs({ "this process", "another process" }) do
 	H.case("Section 1c5: the default takeover port, held by " .. holder .. ", is named with its fix", function()
+		if
+			skipped_without_raise({
+				"one notice for the failed start",
+				"the notice names the port the start asked for",
+				"no server instance is kept",
+			})
+		then
+			return
+		end
 		if holder == "another process" then
 			local said = child_holding("127.0.0.1", 8421)
 			ok(
@@ -335,14 +357,17 @@ H.case("Section 1c6: a host spelled like the error name keeps the generic notice
 	local notes = capture_notes()
 	mp.start()
 	eq(#notes, 1, "one notice for the failed start")
-	ok(
-		notes[1] ~= nil
-			and vim.startswith(
-				notes[1].msg,
-				"Markdown Preview: failed to start server (port 18421): Failed to bind EADDRINUSE:"
-			),
-		"the notice is the generic one: " .. tostring(notes[1] and notes[1].msg)
-	)
+	-- The refusal's text is live-server's own.
+	if not skipped_without_raise({ "the notice is the generic one" }) then
+		ok(
+			notes[1] ~= nil
+				and vim.startswith(
+					notes[1].msg,
+					"Markdown Preview: failed to start server (port 18421): Failed to bind EADDRINUSE:"
+				),
+			"the notice is the generic one: " .. tostring(notes[1] and notes[1].msg)
+		)
+	end
 	eq(mp._server_instance, nil, "no server instance is kept")
 end)
 
@@ -352,6 +377,16 @@ for _, shape in ipairs({
 	{ held = "127.0.0.1", host = "0.0.0.0", what = "the loopback address a wildcard start names" },
 }) do
 	H.case("Section 1c3: a port held on " .. shape.what .. " is named with its fix", function()
+		if
+			skipped_without_raise({
+				"one notice for the failed start",
+				"the notice is an error",
+				"the notice names the port and the settings that avoid it",
+				"no server instance is kept",
+			})
+		then
+			return
+		end
 		local port = held_port(shape.held)
 		mp.setup({ host = shape.host, port = port })
 		H.defer(function()
@@ -622,6 +657,19 @@ vim.wait(30000, function() return false end)
 end
 
 H.case("Section 6: a refused start leaves a running preview's files and lock alone", function()
+	if
+		skipped_without_raise({
+			"the primary's lock holds its token",
+			"one notice for the refused start",
+			"no server instance is kept",
+			"the primary still serves its own buffer",
+			"the primary's index still bakes the primary's token",
+			"the refused start leaves the primary's lock",
+			"a stop after the refused start leaves the primary's lock",
+		})
+	then
+		return
+	end
 	local lock = require("markdown_preview.lock")
 	local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
 	H.defer(lock.remove)

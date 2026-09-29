@@ -255,6 +255,10 @@ ok(uv.fs_stat(lock_file) == nil, "no lock is left")
 mp.stop()
 
 H.section("Section 6: the preview URL")
+-- The live-server that binds localhost as 127.0.0.1 and reports the
+-- address canonical; start_raises arrived with them.
+local ls_features = require("live_server.server").features
+local newer_server = ls_features ~= nil and ls_features.start_raises == true
 -- The URL on_start receives for a start on host; "" when none came.
 local function url_for(host)
 	local url
@@ -290,12 +294,20 @@ if v6 then
 		any_url:match("^http://%[::1%]:%d+/%?t=%x+$") ~= nil,
 		"an IPv6 wildcard bind yields http://[::1]:<port>/?t=<token>: " .. any_url
 	)
-	-- Any spelling of the wildcard is bound as "::", so it opens [::1] too.
-	local long_url = url_for("0:0:0:0:0:0:0:0")
-	ok(
-		long_url:match("^http://%[::1%]:%d+/%?t=%x+$") ~= nil,
-		"a 0:0:0:0:0:0:0:0 bind yields http://[::1]:<port>/?t=<token>: " .. long_url
-	)
+	-- Any spelling of the wildcard is bound as "::", so it opens [::1] too;
+	-- a live-server without start_raises reported the spelling it was given.
+	if newer_server then
+		local long_url = url_for("0:0:0:0:0:0:0:0")
+		ok(
+			long_url:match("^http://%[::1%]:%d+/%?t=%x+$") ~= nil,
+			"a 0:0:0:0:0:0:0:0 bind yields http://[::1]:<port>/?t=<token>: " .. long_url
+		)
+	else
+		H.skip(
+			"a 0:0:0:0:0:0:0:0 bind yields http://[::1]:<port>/?t=<token>"
+				.. " (this live-server lacks features.start_raises: it reports the address as written)"
+		)
+	end
 	-- The loopback set stays 127.0.0.1 and localhost, the address takeover talks to.
 	mp.setup({ open_browser = false, instance_mode = "multi", port = 0, host = "::1" })
 	mp.start()
@@ -323,11 +335,18 @@ local loop_url = url_for("127.0.0.1")
 ok(loop_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil, "a loopback bind's URL has no ?t=: " .. loop_url)
 -- localhost binds 127.0.0.1, and a browser tries localhost's ::1 first,
 -- where another program may listen, so the URL names the address bound.
-local localhost_url = url_for("localhost")
-ok(
-	localhost_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil,
-	"a localhost bind opens 127.0.0.1 with no ?t=: " .. localhost_url
-)
+if newer_server then
+	local localhost_url = url_for("localhost")
+	ok(
+		localhost_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil,
+		"a localhost bind opens 127.0.0.1 with no ?t=: " .. localhost_url
+	)
+else
+	H.skip(
+		"a localhost bind opens 127.0.0.1 with no ?t="
+			.. " (this live-server lacks features.start_raises: it cannot bind localhost)"
+	)
+end
 local net_url = url_for("0.0.0.0")
 ok(net_url:find("?t=", 1, true) ~= nil, "a network bind's URL keeps ?t=: " .. net_url)
 -- An IPv4-mapped bind is named by its IPv4 address, and it is no 127.0.0.1
