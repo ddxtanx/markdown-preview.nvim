@@ -24,13 +24,16 @@ local eq, ok = H.eq, H.ok
 
 -- A live-server without start_raises returned from a start on a held
 -- port with a server that served nothing, so the rows that need its
--- refusal are skipped there, one skip per row. True when they were.
-local function skipped_without_raise(rows)
+-- refusal are skipped there, one skip per row, named with its case so
+-- each reads apart. True when they were.
+local function skipped_without_raise(case, rows)
 	if ls_server.features and ls_server.features.start_raises then
 		return false
 	end
 	for _, row in ipairs(rows) do
-		H.skip(row .. " (this live-server lacks features.start_raises: a start on a held port returns)")
+		H.skip(
+			("%s: %s (this live-server lacks features.start_raises: a start on a held port returns)"):format(case, row)
+		)
 	end
 	return true
 end
@@ -321,7 +324,7 @@ end)
 for _, holder in ipairs({ "this process", "another process" }) do
 	H.case("Section 1c5: the default takeover port, held by " .. holder .. ", is named with its fix", function()
 		if
-			skipped_without_raise({
+			skipped_without_raise("1c5, held by " .. holder, {
 				"one notice for the failed start",
 				"the notice names the port the start asked for",
 				"no server instance is kept",
@@ -363,7 +366,7 @@ H.case("Section 1c6: a host spelled like the error name keeps the generic notice
 	mp.start()
 	eq(#notes, 1, "one notice for the failed start")
 	-- The refusal's text is live-server's own.
-	if not skipped_without_raise({ "the notice is the generic one" }) then
+	if not skipped_without_raise("1c6", { "the notice is the generic one" }) then
 		ok(
 			notes[1] ~= nil
 				and vim.startswith(
@@ -383,7 +386,7 @@ for _, shape in ipairs({
 }) do
 	H.case("Section 1c3: a port held on " .. shape.what .. " is named with its fix", function()
 		if
-			skipped_without_raise({
+			skipped_without_raise("1c3, held on " .. shape.what, {
 				"one notice for the failed start",
 				"the notice is an error",
 				"the notice names the port and the settings that avoid it",
@@ -663,7 +666,7 @@ end
 
 H.case("Section 6: a refused start leaves a running preview's files and lock alone", function()
 	if
-		skipped_without_raise({
+		skipped_without_raise("6", {
 			"the primary's lock holds its token",
 			"one notice for the refused start",
 			"the notice says another Neovim's preview may hold the port",
