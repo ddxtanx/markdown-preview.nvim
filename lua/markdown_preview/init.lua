@@ -839,8 +839,10 @@ function M.start()
 					.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.'
 				):format(tostring(port))
 				-- A probe that timed out reads a live primary as gone; its lock still names the port.
-				local held = M.config.instance_mode == "takeover" and require("markdown_preview.lock").read()
-				if held and held.port == port then
+				local lock = require("markdown_preview.lock")
+				local held = M.config.instance_mode == "takeover" and lock.read()
+				-- A stale lock names the port too; only a holder that answers a connect gets the hint.
+				if held and held.port == port and lock.is_server_alive(port) then
 					msg = msg .. " Another Neovim's preview may hold it: run :MarkdownPreview again to join it."
 				end
 			end

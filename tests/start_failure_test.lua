@@ -691,11 +691,16 @@ H.case("Section 6: a refused start leaves a running preview's files and lock alo
 	local primary = child_primary(a_md, port)
 	local held = lock_bytes()
 	ok(held:find(primary.token, 1, true) ~= nil, "the primary's lock holds its token")
-	-- A probe that timed out, as a starved machine's did: this instance
+	-- The first probe times out, as a starved machine's did: this instance
 	-- reads the live primary as gone and starts a server of its own.
 	local real_alive = lock.is_server_alive
-	lock.is_server_alive = function()
-		return false
+	local probes = 0
+	lock.is_server_alive = function(...)
+		probes = probes + 1
+		if probes == 1 then
+			return false
+		end
+		return real_alive(...)
 	end
 	H.defer(function()
 		lock.is_server_alive = real_alive
@@ -1555,6 +1560,53 @@ H.case("Section 14b: a retarget whose workspace cannot be created leaves the run
 	eq(mp._workspace_dir, ws, "its workspace pointer is kept")
 	ok(armed_on(first_buf) > 0, "the served buffer keeps its autocmds")
 end)
+calls.start, calls.stop = 0, 0
+
+for _, shape in ipairs({
+	{ what = "a lock that names another port", other = true },
+	{ what = "a lock whose holder does not answer", other = false },
+}) do
+	H.case("Section 18: a held port with " .. shape.what .. " gets the plain notice", function()
+		local rows = { "one notice for the refused start", "the notice carries no hint" }
+		if skipped_without_raise("18, " .. shape.what, rows) then
+			return
+		end
+		-- Bound and never listening: it holds the port and refuses every connect.
+		local holder, holder_err = vim.uv.new_tcp()
+		if not holder then
+			error("Section 18: " .. tostring(holder_err), 0)
+		end
+		H.defer(function()
+			holder:close()
+		end)
+		local bound, bind_err = holder:bind("127.0.0.1", 0)
+		if not bound then
+			error("Section 18: " .. tostring(bind_err), 0)
+		end
+		local port = holder:getsockname().port
+		local lock = require("markdown_preview.lock")
+		local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
+		vim.fn.mkdir(vim.fs.dirname(lock_file), "p")
+		H.write_file(
+			lock_file,
+			vim.json.encode({ port = shape.other and free_port() or port, token = "stale", host = "127.0.0.1" })
+		)
+		H.defer(lock.remove)
+		mp.setup({ instance_mode = "takeover", port = port })
+		H.defer(function()
+			mp.setup({ instance_mode = "multi", port = 18421 })
+		end)
+		vim.cmd("buffer " .. first_buf)
+		local notes = capture_notes()
+		mp.start()
+		eq(#notes, 1, rows[1])
+		ok(
+			notes[1] ~= nil
+				and vim.endswith(notes[1].msg, 'or port = 0 with instance_mode = "multi" for an OS-assigned port.'),
+			rows[2] .. ": " .. tostring(notes[1] and notes[1].msg)
+		)
+	end)
+end
 calls.start, calls.stop = 0, 0
 
 H.finish()
