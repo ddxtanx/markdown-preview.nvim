@@ -1515,6 +1515,54 @@ H.case("Section 16b: a temporary in a subfolder sits behind the token gate", fun
 	eq(H.http_get(("http://127.0.0.1:%d/sub/.content.md.4242.tmp"):format(port)).status, 401, row)
 end)
 
+H.case("Section 17b: a failed rename and a dangling link", function()
+	local util = require("markdown_preview.util")
+	local dir = H.tmpdir()
+	local function temps()
+		local left = {}
+		for name in vim.fs.dir(dir) do
+			if name:find("%.tmp$") then
+				table.insert(left, name)
+			end
+		end
+		return table.concat(left, ", ")
+	end
+	local kept = vim.fs.joinpath(dir, "kept.md")
+	H.write_file(kept, "the old text")
+	local real_rename = vim.uv.fs_rename
+	vim.uv.fs_rename = function()
+		return nil, "EXDEV: cross-device link not permitted (stubbed)", "EXDEV"
+	end
+	local wrote, write_err = pcall(util.write_text, kept, "the new text")
+	vim.uv.fs_rename = real_rename
+	ok(
+		not wrote and vim.startswith(tostring(write_err), "EXDEV"),
+		"a failed rename raises with its reason and no Lua position: " .. tostring(write_err)
+	)
+	eq(vim.fn.readblob(kept), "the old text", "the target keeps its text")
+	eq(temps(), "", "no temporary file remains")
+	if vim.fn.has("win32") == 1 then
+		H.skip("a dangling link's named file is created (links need a privilege on Windows)")
+		H.skip("the dangling link stays a link (links need a privilege on Windows)")
+		return
+	end
+	local link = vim.fs.joinpath(dir, "dangling.md")
+	local linked, link_err = vim.uv.fs_symlink("named.md", link)
+	if not linked then
+		error("Section 17b: " .. tostring(link_err), 0)
+	end
+	local through, through_err = pcall(util.write_text, link, "through a dangling link")
+	ok(through, "a write through a dangling link does not raise: " .. tostring(through_err))
+	local named = vim.fs.joinpath(dir, "named.md")
+	eq(
+		vim.uv.fs_stat(named) and vim.fn.readblob(named),
+		"through a dangling link",
+		"a dangling link's named file is created, relative to the link's directory"
+	)
+	local lst = vim.uv.fs_lstat(link)
+	eq(lst and lst.type, "link", "the dangling link stays a link")
+end)
+
 H.case("Section 17: a write keeps what its target was", function()
 	local util = require("markdown_preview.util")
 	local dir = H.tmpdir()

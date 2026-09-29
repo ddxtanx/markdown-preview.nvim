@@ -29,7 +29,13 @@ function M.write_text(path, text)
 	if lst and lst.type == "link" then
 		local real, real_err = vim.uv.fs_realpath(path)
 		if not real then
-			error(tostring(real_err), 0)
+			-- A dangling link: the old truncating open created the file it names.
+			local named, named_err = vim.uv.fs_readlink(path)
+			if not named then
+				error(("%s (%s)"):format(tostring(real_err), tostring(named_err)), 0)
+			end
+			local absolute = named:sub(1, 1) == "/" or named:match("^%a:[/\\]") ~= nil
+			real = absolute and named or vim.fs.joinpath(vim.fs.dirname(path), named)
 		end
 		path = real
 	end
