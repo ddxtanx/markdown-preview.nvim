@@ -798,7 +798,8 @@ function M.start()
 		local index_path = vim.fs.joinpath(dir, M.config.index_name)
 		local asked_host = M.config.host
 		-- vim.pesc keeps a content_name or index_name with pattern characters exact.
-		local protected = { "^/" .. vim.pesc(M.config.content_name) .. "$", "^/asset_root$" }
+		-- The write's temporaries (.<name>.<pid>.tmp): the dot rule that hides them is the sibling's own.
+		local protected = { "^/" .. vim.pesc(M.config.content_name) .. "$", "^/asset_root$", "^/%.[^/]+%.%d+%.tmp$" }
 		if not is_loopback(asked_host) then
 			-- Any other bind's index is gated too; the ?t= URL unlocks it.
 			table.insert(protected, "^/$")

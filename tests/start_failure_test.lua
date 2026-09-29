@@ -1481,6 +1481,13 @@ H.case("Section 16: a write's temporary file is never served", function()
 		eq(H.http_get(("http://127.0.0.1:%d/%s?t=%s"):format(port, name, token)).status, 404, rows[2])
 		ok(not frames:find(".tmp", 1, true), rows[3] .. ": " .. frames:gsub("\r?\n", " | "))
 	end
+	-- Without the dot rule the plugin's own gate refuses it; with the rule, 404 comes first.
+	local gated = "it answers 401 without the token on a live-server without the dot rule"
+	if ls_server.features and ls_server.features.start_raises then
+		H.skip("16: " .. gated .. " (this live-server's dot rule answers 404 first)")
+	else
+		eq(H.http_get(("http://127.0.0.1:%d/%s"):format(port, name)).status, 401, gated)
+	end
 end)
 calls.start, calls.stop = 0, 0
 
