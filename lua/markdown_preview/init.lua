@@ -436,6 +436,22 @@ end
 -- Refresh logic
 ---------------------------------------------------------------------------
 
+-- A push live-server refused would be refused again on every edit or
+-- cursor move, so each kind is told once per server.
+local push_reported = setmetatable({}, { __mode = "k" })
+local function report_push(what, pushed, err)
+	local inst = M._server_instance
+	if pushed or not inst then
+		return
+	end
+	push_reported[inst] = push_reported[inst] or {}
+	if push_reported[inst][what] then
+		return
+	end
+	push_reported[inst][what] = true
+	vim.notify(("Markdown Preview: could not %s: %s"):format(what, tostring(err)), vim.log.levels.WARN)
+end
+
 local function maybe_refresh(bufnr, silent)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
@@ -455,7 +471,7 @@ local function maybe_refresh(bufnr, silent)
 	-- Notify live-server of the content change for immediate SSE push
 	-- In secondary takeover mode, M._server_instance is nil: fs_watch handles reload
 	if M._server_instance then
-		pcall(ls_server.reload, M._server_instance, M.config.content_name)
+		report_push("reload the preview", pcall(ls_server.reload, M._server_instance, M.config.content_name))
 	end
 
 	if not silent and M.config.notify_on_refresh then
@@ -492,7 +508,7 @@ local function send_scroll_sync(bufnr)
 	local total = vim.api.nvim_buf_line_count(bufnr)
 	local payload = vim.json.encode({ line = cursor_line - 1, total = total })
 	if M._server_instance then
-		pcall(ls_server.send_event, M._server_instance, "scroll", payload)
+		report_push("sync the scroll", pcall(ls_server.send_event, M._server_instance, "scroll", payload))
 	elseif M._takeover_port then
 		require("markdown_preview.remote").send_event(M._takeover_port, "scroll", payload, M._token)
 	end
@@ -568,6 +584,8 @@ end
 
 function M.start()
 	local bufnr = vim.api.nvim_get_current_buf()
+	-- What a retarget live-server refuses goes back to.
+	local served_dir = M._workspace_dir
 	M._active_bufnr = bufnr
 
 	-- Takeover coordination (lock probe + cross-instance events) talks to
@@ -631,8 +649,6 @@ function M.start()
 	write_index_if_needed(dir)
 	write_content(dir, text, bufnr)
 	M._last_text_by_buf[bufnr] = text
-
-	set_autocmds_for_buffer(bufnr)
 
 	-- Patterns matching workspace-served files that require ?t=<token>.
 	-- vim.pesc escapes every Lua-pattern magic char, so custom content_name /
@@ -700,6 +716,10 @@ function M.start()
 			end,
 		})
 		if not ok then
+			-- Nothing is kept from a start that failed: the token and the
+			-- workspace go with it, and no autocmd was armed.
+			M._token = nil
+			M._workspace_dir = nil
 			vim.notify(
 				("Markdown Preview: failed to start server (port %s): %s"):format(tostring(port), tostring(inst)),
 				vim.log.levels.ERROR
@@ -716,6 +736,8 @@ function M.start()
 			if not locked then
 				pcall(ls_server.stop, inst)
 				lock.remove()
+				M._token = nil
+				M._workspace_dir = nil
 				vim.notify(
 					("Markdown Preview: failed to start server (port %s): %s"):format(
 						tostring(inst.port),
@@ -729,6 +751,9 @@ function M.start()
 		M._server_instance = inst
 		M._is_primary = true
 		M._takeover_port = nil
+		-- Armed only once a server answers, so a failed start leaves no
+		-- autocmd refreshing a preview that does not exist.
+		set_autocmds_for_buffer(bufnr)
 
 		if type(M.config.hooks.on_start) == "function" then
 			M.config.hooks.on_start(browser_url(inst.port))
@@ -742,8 +767,22 @@ function M.start()
 	else
 		-- Server already running, retarget to this buffer's workspace
 		local index_path = vim.fs.joinpath(dir, M.config.index_name)
-		pcall(ls_server.update_target, M._server_instance, dir, index_path)
-		pcall(ls_server.reload, M._server_instance, M.config.content_name)
+		local retargeted, watching = pcall(ls_server.update_target, M._server_instance, dir, index_path)
+		if not retargeted then
+			-- The server still serves the last workspace, so the preview
+			-- and its autocmds stay with it.
+			M._workspace_dir = served_dir
+			vim.notify("Markdown Preview: could not retarget: " .. tostring(watching), vim.log.levels.ERROR)
+			return
+		end
+		if watching == false then
+			vim.notify(
+				"Markdown Preview: the preview follows this buffer, but live reload is off: live-server could not watch its workspace",
+				vim.log.levels.WARN
+			)
+		end
+		set_autocmds_for_buffer(bufnr)
+		report_push("reload the preview", pcall(ls_server.reload, M._server_instance, M.config.content_name))
 
 		if type(M.config.hooks.on_start) == "function" then
 			M.config.hooks.on_start(browser_url(M._server_instance.port))

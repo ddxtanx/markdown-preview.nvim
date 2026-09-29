@@ -21,6 +21,8 @@ All notable changes to this project; versions follow SemVer. From `[Unreleased]`
 ### Fixed
 
 - A takeover-mode lock file that cannot be made private fails the start with the start-failure notification; before, the server stayed running with an empty lock and the start raised a Lua error.
+- A preview that fails to start (a taken port, an address live-server cannot bind, a lock file that cannot be made private) leaves no autocmds, token or workspace behind; before, six autocmds kept refreshing a preview that did not exist.
+- Switching the preview to another buffer that live-server refuses reads `Markdown Preview: could not retarget: <reason>` and keeps the preview on the buffer it showed; one it serves without watching warns that live reload is off. A reload or scroll update live-server refuses is reported once per preview server; before, all three were dropped without a word.
 
 ### Security
 
