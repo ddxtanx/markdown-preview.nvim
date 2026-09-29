@@ -24,7 +24,8 @@ end
 -- A rename, never a truncating open: a failed write must not empty a file being served.
 function M.write_text(path, text)
 	M.mkdirp(dirname(path))
-	local tmp = ("%s.%d.tmp"):format(path, vim.uv.os_getpid())
+	-- Dot-named, so live-server neither serves nor watches it while it exists.
+	local tmp = vim.fs.joinpath(vim.fs.dirname(path), (".%s.%d.tmp"):format(vim.fs.basename(path), vim.uv.os_getpid()))
 	local function fail(err)
 		local removed, remove_err = vim.uv.fs_unlink(tmp)
 		if not removed and not tostring(remove_err):find("ENOENT", 1, true) then

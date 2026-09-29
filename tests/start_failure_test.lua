@@ -26,14 +26,13 @@ local eq, ok = H.eq, H.ok
 -- port with a server that served nothing, so the rows that need its
 -- refusal are skipped there, one skip per row, named with its case so
 -- each reads apart. True when they were.
-local function skipped_without_raise(case, rows)
+local function skipped_without_raise(case, rows, why)
 	if ls_server.features and ls_server.features.start_raises then
 		return false
 	end
+	why = why or "a start on a held port returns"
 	for _, row in ipairs(rows) do
-		H.skip(
-			("%s: %s (this live-server lacks features.start_raises: a start on a held port returns)"):format(case, row)
-		)
+		H.skip(("%s: %s (this live-server lacks features.start_raises: %s)"):format(case, row, why))
 	end
 	return true
 end
@@ -739,12 +738,12 @@ end)
 calls.start, calls.stop = 0, 0
 
 -- vim.uv.fs_open refuses a write of a file whose name begins with name
--- (its temporary copy included) until the enclosing case ends, as a full
--- or read-only disk does.
+-- (its dot-named temporary copy included) until the enclosing case ends,
+-- as a full or read-only disk does.
 local function refuse_write(name)
 	local real_open = vim.uv.fs_open
 	vim.uv.fs_open = function(p, flags, ...)
-		if flags == "w" and type(p) == "string" and vim.startswith(vim.fs.basename(p), name) then
+		if flags == "w" and type(p) == "string" and vim.startswith((vim.fs.basename(p):gsub("^%.", "")), name) then
 			return nil, "ENOSPC: no space left on device (stubbed): " .. p, "ENOSPC"
 		end
 		return real_open(p, flags, ...)
@@ -1402,6 +1401,76 @@ H.case("Section 7h: a bundled index that cannot be read stops the server with on
 	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): EACCES"):format(port))
 	eq(mp._server_instance, nil, "no server instance is kept")
 	ok(port_free(port), "the server is stopped: its port binds again")
+end)
+calls.start, calls.stop = 0, 0
+
+H.case("Section 16: a write's temporary file is never served", function()
+	mp.setup({ host = "0.0.0.0", port = free_port() })
+	H.defer(function()
+		mp.setup({ host = "127.0.0.1", port = 18421 })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	vim.api.nvim_buf_set_lines(first_buf, 0, -1, false, { "# before the held write" })
+	mp.start()
+	H.defer(mp.stop)
+	local port, token, ws = mp._server_instance and mp._server_instance.port or 0, mp._token or "", mp._workspace_dir
+	local stream, stream_err = H.raw_connect(port)
+	if not stream then
+		error("Section 16: " .. tostring(stream_err), 0)
+	end
+	H.defer(function()
+		stream:close()
+	end)
+	local sent, send_err =
+		stream:send(("GET /__live/events?t=%s HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n\r\n"):format(token, port))
+	if not sent then
+		error("Section 16: " .. tostring(send_err), 0)
+	end
+	stream:read(2000, function(b)
+		return b:find("\r\n\r\n", 1, true) ~= nil
+	end)
+	-- The rename holds, so the temporary stays with the new text, as a write cut short leaves it.
+	local real_rename = vim.uv.fs_rename
+	vim.uv.fs_rename = function(from, ...)
+		if type(from) == "string" and from:find("%.tmp$") then
+			return true
+		end
+		return real_rename(from, ...)
+	end
+	H.defer(function()
+		vim.uv.fs_rename = real_rename
+	end)
+	local temps = {}
+	H.defer(function()
+		for _, name in ipairs(temps) do
+			vim.uv.fs_unlink(vim.fs.joinpath(ws, name))
+		end
+	end)
+	vim.api.nvim_buf_set_lines(first_buf, 0, -1, false, { "# the held write" })
+	mp.refresh()
+	local frames = stream:read(800, function()
+		return false
+	end)
+	for name in vim.fs.dir(ws) do
+		if name:find("%.tmp$") then
+			table.insert(temps, name)
+		end
+	end
+	local name = "none"
+	for _, t in ipairs(temps) do
+		if t:find("content.md", 1, true) then
+			name = t
+		end
+	end
+	ok(name ~= "none", "the content's held temporary is present: " .. table.concat(temps, ", "))
+	eq(vim.fn.readblob(vim.fs.joinpath(ws, name)), "# the held write", "it holds the new text")
+	-- The dot rule that refuses and leaves unwatched a dot-named file arrived with start_raises.
+	local rows = { "it answers 404 without the token", "it answers 404 with the token", "no reload frame names it" }
+	if not skipped_without_raise("16", rows, "it serves and watches dot-named files") then
+		eq(H.http_get(("http://127.0.0.1:%d/%s"):format(port, name)).status, 404, rows[1])
+		eq(H.http_get(("http://127.0.0.1:%d/%s?t=%s"):format(port, name, token)).status, 404, rows[2])
+		ok(not frames:find(".tmp", 1, true), rows[3] .. ": " .. frames:gsub("\r?\n", " | "))
+	end
 end)
 calls.start, calls.stop = 0, 0
 
