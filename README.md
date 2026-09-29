@@ -188,7 +188,7 @@ The notification will show the full URL including the auth token (e.g. `http://1
 > - With any `host` but `127.0.0.1` and `localhost` (which binds `127.0.0.1`), `::1` included, the tokenized URL is required for *everything* the plugin writes, including the page itself: requests without `?t=<token>` get 401. Peers on your network cannot read your buffer without the URL. A `workspace_dir` set in multi mode is served whole, so any other file you keep there is readable without it.
 > - Traffic is plain, unencrypted HTTP. Anyone who obtains the URL (or can sniff the local network) can read the previewed buffer while the preview runs.
 > - Takeover mode supports `host = "127.0.0.1"`, `"localhost"` (which binds `127.0.0.1`) or `"0.0.0.0"` only. To bind a specific interface, use `instance_mode = "multi"`.
-> - Zero-config alternative: keep the default loopback bind and tunnel instead — `ssh -L 8421:localhost:8421 <remote>` — then open the URL printed by `on_start` locally, replacing the host with `127.0.0.1`. Nothing is exposed to the network, and traffic is encrypted by SSH.
+> - Zero-config alternative: keep the default loopback bind and tunnel instead: `ssh -L 8421:localhost:8421 <remote>`, then open the URL printed by `on_start` locally. Nothing is exposed to the network, and traffic is encrypted by SSH.
 
 ### Instance modes
 
