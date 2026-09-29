@@ -52,12 +52,30 @@ function M.write_text(path, text)
 	end
 end
 
+-- Raises at level 0 as write_text does: the start notice carries its reason.
 function M.read_text(path)
-	assert(type(path) == "string" and #path > 0, "read_text: path is nil")
-	local fd = assert(vim.uv.fs_open(path, "r", 420))
-	local stat = assert(vim.uv.fs_fstat(fd))
-	local data = assert(vim.uv.fs_read(fd, stat.size, 0))
-	assert(vim.uv.fs_close(fd))
+	if type(path) ~= "string" or path == "" then
+		error("read_text: path is nil", 0)
+	end
+	local fd, open_err = vim.uv.fs_open(path, "r", 420)
+	if not fd then
+		error(tostring(open_err), 0)
+	end
+	local stat, stat_err = vim.uv.fs_fstat(fd)
+	local data, read_err
+	if stat then
+		data, read_err = vim.uv.fs_read(fd, stat.size, 0)
+	end
+	local closed, close_err = vim.uv.fs_close(fd)
+	if not stat then
+		error(tostring(stat_err), 0)
+	end
+	if not data then
+		error(tostring(read_err), 0)
+	end
+	if not closed then
+		error(tostring(close_err), 0)
+	end
 	return data
 end
 

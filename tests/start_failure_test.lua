@@ -1347,4 +1347,30 @@ H.case("Section 15: a wildcard rule that raises leaves the URL on the address bo
 end)
 calls.start, calls.stop = 0, 0
 
+H.case("Section 7h: a bundled index that cannot be read stops the server with one notice", function()
+	local real_open = vim.uv.fs_open
+	vim.uv.fs_open = function(p, flags, ...)
+		if flags == "r" and type(p) == "string" and vim.endswith(p, "assets/index.html") then
+			return nil, "EACCES: permission denied (stubbed): " .. p, "EACCES"
+		end
+		return real_open(p, flags, ...)
+	end
+	H.defer(function()
+		vim.uv.fs_open = real_open
+	end)
+	local port = free_port()
+	mp.setup({ port = port })
+	H.defer(function()
+		mp.setup({ port = 18421 })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): EACCES"):format(port))
+	eq(mp._server_instance, nil, "no server instance is kept")
+	ok(port_free(port), "the server is stopped: its port binds again")
+end)
+calls.start, calls.stop = 0, 0
+
 H.finish()
