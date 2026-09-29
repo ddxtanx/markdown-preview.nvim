@@ -21,11 +21,22 @@ function M.file_exists(path)
 	return stat and stat.type == "file"
 end
 
+-- Raises at level 0, so a notice carries luv's reason and no Lua position.
 function M.write_text(path, text)
 	M.mkdirp(dirname(path))
-	local fd = assert(vim.uv.fs_open(path, "w", 420)) -- 0644
-	assert(vim.uv.fs_write(fd, text, 0))
-	assert(vim.uv.fs_close(fd))
+	local fd, open_err = vim.uv.fs_open(path, "w", 420) -- 0644
+	if not fd then
+		error(tostring(open_err), 0)
+	end
+	local wrote, write_err = vim.uv.fs_write(fd, text, 0)
+	if not wrote then
+		vim.uv.fs_close(fd)
+		error(tostring(write_err), 0)
+	end
+	local closed, close_err = vim.uv.fs_close(fd)
+	if not closed then
+		error(tostring(close_err), 0)
+	end
 end
 
 function M.read_text(path)

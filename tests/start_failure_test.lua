@@ -46,10 +46,11 @@ local function armed()
 	return got and #list or 0
 end
 
--- The plugin's autocmds on one buffer.
+-- The plugin's autocmds on one buffer; no group counts as none.
 local function armed_on(bufnr)
 	local n = 0
-	for _, au in ipairs(vim.api.nvim_get_autocmds({ group = "MarkdownPreviewAuto" })) do
+	local got, list = pcall(vim.api.nvim_get_autocmds, { group = "MarkdownPreviewAuto" })
+	for _, au in ipairs(got and list or {}) do
 		if au.buffer == bufnr then
 			n = n + 1
 		end
@@ -646,6 +647,173 @@ H.case("Section 6: a refused start leaves a running preview's files and lock alo
 	eq(lock_bytes(), held, "the refused start leaves the primary's lock")
 	mp.stop()
 	eq(lock_bytes(), held, "a stop after the refused start leaves the primary's lock")
+end)
+calls.start, calls.stop = 0, 0
+
+-- vim.uv.fs_open refuses a write of a file whose name ends in suffix until
+-- the enclosing case ends, as a full or read-only disk does.
+local function refuse_write(suffix)
+	local real_open = vim.uv.fs_open
+	vim.uv.fs_open = function(p, flags, ...)
+		if flags == "w" and type(p) == "string" and vim.endswith(p, suffix) then
+			return nil, "ENOSPC: no space left on device (stubbed): " .. p, "ENOSPC"
+		end
+		return real_open(p, flags, ...)
+	end
+	H.defer(function()
+		vim.uv.fs_open = real_open
+	end)
+end
+
+-- True when a fresh listener can take port again: no server holds it.
+local function port_free(port)
+	local tcp, tcp_err = vim.uv.new_tcp()
+	if not tcp then
+		error("port_free: " .. tostring(tcp_err), 0)
+	end
+	local bound = tcp:bind("127.0.0.1", port)
+	local listening = bound and tcp:listen(8, function() end)
+	tcp:close()
+	return listening == 0
+end
+
+-- One error notice whose text carries no Lua position or source path.
+local function one_clean_error(notes, prefix)
+	eq(#notes, 1, "one notice")
+	eq(notes[1] and notes[1].level, vim.log.levels.ERROR, "the notice is an error")
+	local msg = notes[1] and notes[1].msg or ""
+	ok(vim.startswith(msg, prefix), "the notice begins " .. prefix .. ": " .. msg)
+	ok(not msg:find(".lua:", 1, true), "the notice names no Lua position: " .. msg)
+end
+
+H.case("Section 7: a session token that cannot be made fails the start with one notice", function()
+	vim.cmd("buffer " .. first_buf)
+	local ls_util = require("live_server.util")
+	local real_token = ls_util.random_token
+	ls_util.random_token = function()
+		error("random_token: no secure random source (stubbed)", 2)
+	end
+	H.defer(function()
+		ls_util.random_token = real_token
+	end)
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	one_clean_error(notes, "Markdown Preview: could not make a session token: random_token: no secure random source")
+	eq(mp._server_instance, nil, "no server instance is kept")
+	eq(armed(), 0, "no autocmd is armed")
+	eq(mp._token, nil, "no token is kept")
+end)
+
+H.case("Section 7b: autocmds that cannot be armed stop the server and remove the lock", function()
+	vim.cmd("buffer " .. first_buf)
+	local port = free_port()
+	mp.setup({ instance_mode = "takeover", port = port, auto_refresh_events = { "NoSuchEvent" } })
+	H.defer(function()
+		mp.setup({
+			instance_mode = "multi",
+			port = 18421,
+			auto_refresh_events = { "InsertLeave", "TextChanged", "TextChangedI", "BufWritePost" },
+		})
+	end)
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): "):format(port))
+	eq(mp._server_instance, nil, "no server instance is kept")
+	ok(port_free(port), "the server is stopped: its port binds again")
+	eq(
+		vim.uv.fs_stat(vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")),
+		nil,
+		"no lock is left"
+	)
+	eq(armed_on(first_buf), 0, "no autocmd is armed")
+end)
+
+H.case("Section 7c: content that cannot be written stops the server with one notice", function()
+	vim.cmd("buffer " .. first_buf)
+	local port = free_port()
+	mp.setup({ port = port })
+	H.defer(function()
+		mp.setup({ port = 18421 })
+	end)
+	refuse_write("content.md")
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): ENOSPC"):format(port))
+	eq(mp._server_instance, nil, "no server instance is kept")
+	ok(port_free(port), "the server is stopped: its port binds again")
+	eq(armed_on(first_buf), 0, "no autocmd is armed")
+end)
+
+H.case("Section 7d: a lock that cannot be opened stops the server with one notice", function()
+	vim.cmd("buffer " .. first_buf)
+	local port = free_port()
+	mp.setup({ instance_mode = "takeover", port = port })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", port = 18421 })
+	end)
+	refuse_write("server.lock")
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): "):format(port))
+	eq(mp._server_instance, nil, "no server instance is kept")
+	ok(port_free(port), "the server is stopped: its port binds again")
+	eq(armed_on(first_buf), 0, "no autocmd is armed")
+end)
+
+H.case("Section 7e: a retarget whose content cannot be written goes back to the served buffer", function()
+	vim.cmd("buffer " .. first_buf)
+	mp.start()
+	H.defer(mp.stop)
+	local before = mp._workspace_dir
+	local port = mp._server_instance and mp._server_instance.port or 0
+	vim.cmd("buffer " .. second_buf)
+	refuse_write("content.md")
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	one_clean_error(notes, "Markdown Preview: could not retarget: ENOSPC")
+	eq(mp._workspace_dir, before, "the workspace pointer is the one served before")
+	ok(armed_on(first_buf) > 0, "the served buffer keeps its autocmds")
+	eq(armed_on(second_buf), 0, "the refused buffer is not armed")
+	local r = H.http_get(("http://127.0.0.1:%d/content.md?t=%s"):format(port, mp._token or ""))
+	ok(
+		r.status == 200 and r.body:find("# doc", 1, true) ~= nil,
+		("the server serves the first buffer again: %d %s"):format(r.status, r.body)
+	)
+end)
+
+H.case("Section 7f: a retarget that cannot go back either stops the server", function()
+	vim.cmd("buffer " .. first_buf)
+	mp.start()
+	H.defer(mp.stop)
+	local port = mp._server_instance and mp._server_instance.port or 0
+	vim.cmd("buffer " .. second_buf)
+	refuse_write("content.md")
+	local real_update = ls_server.update_target
+	local retargets = 0
+	stub("update_target", function(...)
+		retargets = retargets + 1
+		if retargets > 1 then
+			error("update_target: root is gone (stubbed)", 2)
+		end
+		return real_update(...)
+	end)
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	one_clean_error(notes, "Markdown Preview: could not retarget: ENOSPC")
+	ok(
+		notes[1] and notes[1].msg:find("update_target: root is gone (stubbed)", 1, true),
+		"the notice names the way back's refusal too"
+	)
+	eq(mp._server_instance, nil, "no server instance is kept")
+	ok(port_free(port), "the server is stopped: its port binds again")
+	eq(armed(), 0, "no autocmd is armed")
+	eq(mp._workspace_dir, nil, "the workspace is cleared")
 end)
 calls.start, calls.stop = 0, 0
 

@@ -158,7 +158,7 @@ local function write_index(dir)
 	local dst = vim.fs.joinpath(dir, M.config.index_name)
 	local src = util.resolve_asset("assets/index.html")
 	if not src then
-		error("Could not locate assets/index.html in runtimepath. Make sure the plugin ships it.")
+		error("Could not locate assets/index.html in runtimepath. Make sure the plugin ships it.", 0)
 	end
 	local content = util.read_text(src)
 
@@ -527,7 +527,8 @@ local function set_autocmds_for_buffer(bufnr)
 
 	if M.config.auto_refresh then
 		for _, ev in ipairs(M.config.auto_refresh_events) do
-			vim.api.nvim_create_autocmd(ev, {
+			-- Called by pcall itself, so the API's message carries no Lua position.
+			local made, err = pcall(vim.api.nvim_create_autocmd, ev, {
 				group = M._augroup,
 				buffer = bufnr,
 				callback = function()
@@ -535,6 +536,9 @@ local function set_autocmds_for_buffer(bufnr)
 				end,
 				desc = "Markdown Preview auto-refresh (debounced)",
 			})
+			if not made then
+				error("auto_refresh_events: " .. tostring(err), 0)
+			end
 		end
 	end
 
@@ -630,6 +634,16 @@ local function forget_session()
 	M._bound_host = nil
 end
 
+-- A server a start or a retarget cannot finish with: stopped, and the
+-- session dropped with it.
+local function abandon(inst)
+	pcall(ls_server.stop, inst)
+	if M._server_instance == inst then
+		M._server_instance = nil
+	end
+	forget_session()
+end
+
 function M.start()
 	local bufnr = vim.api.nvim_get_current_buf()
 	-- What a retarget live-server refuses goes back to.
@@ -694,7 +708,13 @@ function M.start()
 	-- Primary path (takeover) or single-instance (multi). Generate a token
 	-- once per server lifetime and reuse it across retargets.
 	if not M._token or M._token == "" then
-		M._token = ls_util.random_token(16)
+		local made, token = pcall(ls_util.random_token, 16)
+		if not made then
+			forget_session()
+			vim.notify("Markdown Preview: could not make a session token: " .. tostring(token), vim.log.levels.ERROR)
+			return
+		end
+		M._token = token
 	end
 
 	-- A running server keeps serving the last buffer until it accepts the
@@ -790,35 +810,36 @@ function M.start()
 		-- live-server reports canonical ("localhost" binds 127.0.0.1), not a
 		-- host a setup() may have changed since.
 		M._bound_host = inst.host or asked_host
-		publish()
-		-- The lock names the port the server got, so it is written once the
-		-- server listens. A lock that cannot be made private stops the server
-		-- again and fails the start as a busy port does: a primary without
-		-- its lock left a listening server, a raw Lua error and no browser.
-		if M.config.instance_mode == "takeover" then
-			-- Owned from the write on: a write that fails may leave the file it opened.
-			M._lock_owned = true
-			local locked, lock_err =
-				pcall(require("markdown_preview.lock").write, inst.port, dir, M._token, M._bound_host)
-			if not locked then
-				pcall(ls_server.stop, inst)
-				forget_session()
-				vim.notify(
-					("Markdown Preview: failed to start server (port %s): %s"):format(
-						tostring(inst.port),
-						tostring(lock_err)
-					),
-					vim.log.levels.ERROR
-				)
-				return
+		-- A raise from here on stops the server again and fails the start as
+		-- a busy port does: a primary without its files, its lock or its
+		-- autocmds left a listening server, a raw Lua error and no browser.
+		local finished, finish_err = pcall(function()
+			publish()
+			-- The lock names the port the server got, so it is written once
+			-- the server listens.
+			if M.config.instance_mode == "takeover" then
+				-- Owned from the write on: a write that fails may leave the file it opened.
+				M._lock_owned = true
+				require("markdown_preview.lock").write(inst.port, dir, M._token, M._bound_host)
 			end
+			-- Armed only once a server answers, so a failed start leaves no
+			-- autocmd refreshing a preview that does not exist.
+			set_autocmds_for_buffer(bufnr)
+		end)
+		if not finished then
+			abandon(inst)
+			vim.notify(
+				("Markdown Preview: failed to start server (port %s): %s"):format(
+					tostring(inst.port),
+					tostring(finish_err)
+				),
+				vim.log.levels.ERROR
+			)
+			return
 		end
 		M._server_instance = inst
 		M._is_primary = true
 		M._takeover_port = nil
-		-- Armed only once a server answers, so a failed start leaves no
-		-- autocmd refreshing a preview that does not exist.
-		set_autocmds_for_buffer(bufnr)
 
 		if type(M.config.hooks.on_start) == "function" then
 			M.config.hooks.on_start(browser_url(display_host(M._bound_host), inst.port, M._bound_host))
@@ -843,6 +864,39 @@ function M.start()
 			vim.notify("Markdown Preview: could not retarget: " .. tostring(watching), vim.log.levels.ERROR)
 			return
 		end
+		local inst = M._server_instance
+		local published, publish_err = pcall(publish)
+		if not published then
+			-- The server goes back to the workspace it served, so the preview
+			-- and its autocmds stay with the last buffer.
+			M._workspace_dir = served_dir
+			local back, back_err =
+				pcall(ls_server.update_target, inst, served_dir, vim.fs.joinpath(served_dir, M.config.index_name))
+			if not back then
+				abandon(inst)
+				vim.notify(
+					("Markdown Preview: could not retarget: %s; the server could not go back and is stopped: %s"):format(
+						tostring(publish_err),
+						tostring(back_err)
+					),
+					vim.log.levels.ERROR
+				)
+				return
+			end
+			vim.notify("Markdown Preview: could not retarget: " .. tostring(publish_err), vim.log.levels.ERROR)
+			return
+		end
+		-- The last buffer's autocmds went with the group, so a preview that
+		-- nothing refreshes is stopped.
+		local armed, arm_err = pcall(set_autocmds_for_buffer, bufnr)
+		if not armed then
+			abandon(inst)
+			vim.notify(
+				("Markdown Preview: could not retarget: %s; the server is stopped"):format(tostring(arm_err)),
+				vim.log.levels.ERROR
+			)
+			return
+		end
 		-- live-server's own warning names the cause, where there is one.
 		if watching == false then
 			vim.notify(
@@ -850,8 +904,6 @@ function M.start()
 				vim.log.levels.WARN
 			)
 		end
-		publish()
-		set_autocmds_for_buffer(bufnr)
 		report_push("reload the preview", pcall(ls_server.reload, M._server_instance, M.config.content_name))
 
 		if type(M.config.hooks.on_start) == "function" then

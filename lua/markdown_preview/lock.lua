@@ -49,15 +49,25 @@ function M.write(port, workspace, token, host)
 	-- truncate, measured, and a primary writes over a stale lock); fchmod
 	-- makes the file private before the token is written, and a file that
 	-- cannot be made private gets no token.
-	local fd = assert(uv.fs_open(path, "w", 384))
+	-- Level 0 throughout: the start-failure notice shows the message, with no position.
+	local fd, open_err = uv.fs_open(path, "w", 384)
+	if not fd then
+		error("cannot open the lock file: " .. tostring(open_err), 0)
+	end
 	local private, chmod_err = uv.fs_fchmod(fd, 384)
 	if not private then
 		uv.fs_close(fd)
-		-- Level 0: the start-failure notice shows the message, with no position.
 		error("cannot make the lock file private: " .. tostring(chmod_err), 0)
 	end
-	assert(uv.fs_write(fd, json, 0))
-	assert(uv.fs_close(fd))
+	local wrote, write_err = uv.fs_write(fd, json, 0)
+	if not wrote then
+		uv.fs_close(fd)
+		error("cannot write the lock file: " .. tostring(write_err), 0)
+	end
+	local closed, close_err = uv.fs_close(fd)
+	if not closed then
+		error("cannot close the lock file: " .. tostring(close_err), 0)
+	end
 end
 
 function M.remove()
