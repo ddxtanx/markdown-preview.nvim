@@ -599,7 +599,17 @@ end
 -- written, and that showed as its loopback too.
 local function wildcard_loopback(ip)
 	if ls_server.wildcard_loopback then
-		return ls_server.wildcard_loopback(ip)
+		-- A caller may replace the rule; one that raises must not fail a started server.
+		local ruled, loopback = pcall(ls_server.wildcard_loopback, ip)
+		if ruled then
+			return loopback
+		end
+		vim.notify(
+			"Markdown Preview: live-server's wildcard rule raised, so the URL names the address bound: "
+				.. tostring(loopback),
+			vim.log.levels.WARN
+		)
+		return nil
 	end
 	return ip == "::" and "::1" or nil
 end

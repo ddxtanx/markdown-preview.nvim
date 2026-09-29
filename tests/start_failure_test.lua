@@ -1300,4 +1300,51 @@ H.case("Section 7g: a retarget whose autocmds cannot be armed stops the server w
 end)
 calls.start, calls.stop = 0, 0
 
+H.case("Section 15: a wildcard rule that raises leaves the URL on the address bound", function()
+	local real_start, real_rule = ls_server.start, ls_server.wildcard_loopback
+	local raising = false
+	-- live-server's own start reads the rule too; it raises once the server listens.
+	stub("start", function(...)
+		local inst = real_start(...)
+		raising = true
+		return inst
+	end)
+	stub("wildcard_loopback", function(ip)
+		if raising then
+			error("a replaced rule broke", 0)
+		end
+		return real_rule(ip)
+	end)
+	local url
+	local real_hook = mp.config.hooks.on_start
+	mp.setup({
+		port = free_port(),
+		hooks = {
+			on_start = function(u)
+				url = u
+			end,
+		},
+	})
+	H.defer(function()
+		mp.setup({ port = 18421, hooks = { on_start = real_hook } })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	H.defer(mp.stop)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	ok(mp._server_instance ~= nil, "the server runs")
+	ok(
+		url ~= nil and url:match("^http://127%.0%.0%.1:%d+/$") ~= nil,
+		"the URL names the address bound: " .. tostring(url)
+	)
+	eq(#notes, 1, "one notice for the rule that raised")
+	eq(notes[1] and notes[1].level, vim.log.levels.WARN, "the notice is a warning")
+	ok(
+		notes[1] ~= nil and notes[1].msg:find("a replaced rule broke", 1, true) ~= nil,
+		"the notice carries the rule's message: " .. tostring(notes[1] and notes[1].msg)
+	)
+end)
+calls.start, calls.stop = 0, 0
+
 H.finish()
