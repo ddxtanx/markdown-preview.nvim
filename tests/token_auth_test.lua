@@ -314,6 +314,8 @@ end
 -- a network bind's page has no other source.
 local loop_url = url_for("127.0.0.1")
 ok(loop_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil, "a loopback bind's URL has no ?t=: " .. loop_url)
+local localhost_url = url_for("localhost")
+ok(localhost_url:match("^http://localhost:%d+/$") ~= nil, "a localhost bind's URL has no ?t=: " .. localhost_url)
 local net_url = url_for("0.0.0.0")
 ok(net_url:find("?t=", 1, true) ~= nil, "a network bind's URL keeps ?t=: " .. net_url)
 -- The tokenless URL still opens a page whose stream authenticates, with the
