@@ -924,10 +924,11 @@ function M.start()
 			)
 			return
 		end
-		-- live-server's own warning names the cause, where there is one.
+		-- live-server's own warning names the cause, where there is one. An
+		-- edit here still refreshes: this plugin pushes its own reload.
 		if watching == false then
 			vim.notify(
-				"Markdown Preview: the server reports live reload off; edits may not refresh the preview",
+				"Markdown Preview: the server reports file watching off; changes made outside this editor may not refresh the preview",
 				vim.log.levels.WARN
 			)
 		end

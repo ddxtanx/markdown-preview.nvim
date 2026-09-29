@@ -481,7 +481,7 @@ H.case("Section 3: a retarget live-server refuses keeps the preview where it was
 	eq(calls.start, started, "on_start is not called for a retarget that raised")
 end)
 
-H.case("Section 3b: a retarget that cannot watch says live reload is off", function()
+H.case("Section 3b: a retarget that cannot watch says file watching is off", function()
 	vim.cmd("buffer " .. first_buf)
 	mp.start()
 	H.defer(mp.stop)
@@ -494,8 +494,8 @@ H.case("Section 3b: a retarget that cannot watch says live reload is off", funct
 	eq(#notes, 1, "one notice for a retarget that could not watch")
 	eq(
 		notes[1] and notes[1].msg,
-		"Markdown Preview: the server reports live reload off; edits may not refresh the preview",
-		"the notice says live reload is off and names no cause"
+		"Markdown Preview: the server reports file watching off; changes made outside this editor may not refresh the preview",
+		"the notice names what stops refreshing and no cause"
 	)
 	eq(notes[1] and notes[1].level, vim.log.levels.WARN, "the notice is a warning")
 	eq(mp._workspace_dir, second_ws, "the workspace is the retargeted buffer's")
