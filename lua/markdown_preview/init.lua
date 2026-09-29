@@ -854,6 +854,11 @@ function M.start()
 					"Markdown Preview: port %s is in use by another program. Set port to a free one in setup(), "
 					.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.'
 				):format(tostring(port))
+				-- A probe that timed out reads a live primary as gone; its lock still names the port.
+				local held = M.config.instance_mode == "takeover" and require("markdown_preview.lock").read()
+				if held and held.port == port then
+					msg = msg .. " Another Neovim's preview may hold it: run :MarkdownPreview again to join it."
+				end
 			end
 			vim.notify(msg, vim.log.levels.ERROR)
 			return

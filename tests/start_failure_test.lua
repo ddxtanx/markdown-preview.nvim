@@ -666,6 +666,7 @@ H.case("Section 6: a refused start leaves a running preview's files and lock alo
 		skipped_without_raise({
 			"the primary's lock holds its token",
 			"one notice for the refused start",
+			"the notice says another Neovim's preview may hold the port",
 			"no server instance is kept",
 			"the primary still serves its own buffer",
 			"the primary's index still bakes the primary's token",
@@ -708,6 +709,14 @@ H.case("Section 6: a refused start leaves a running preview's files and lock alo
 	local notes = capture_notes()
 	mp.start()
 	eq(#notes, 1, "one notice for the refused start")
+	ok(
+		notes[1] ~= nil
+			and vim.endswith(
+				notes[1].msg,
+				" Another Neovim's preview may hold it: run :MarkdownPreview again to join it."
+			),
+		"the notice says another Neovim's preview may hold the port: " .. tostring(notes[1] and notes[1].msg)
+	)
 	eq(mp._server_instance, nil, "no server instance is kept")
 	local content = H.http_get(("http://127.0.0.1:%d/content.md?t=%s"):format(port, primary.token))
 	ok(
