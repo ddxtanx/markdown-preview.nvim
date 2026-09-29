@@ -54,7 +54,7 @@ function M.send_event(port, event_type, json_data, token, on_done)
 	local req = string.format("GET /__live/inject?%s HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n", query)
 	local connecting, connect_err = tcp:connect("127.0.0.1", port, function(err)
 		if err then
-			return finish(false, tostring(err))
+			return finish(false, ("the primary on port %d is gone (%s)"):format(port, tostring(err)))
 		end
 		local head = ""
 		local reading, read_err = tcp:read_start(function(chunk_err, chunk)
@@ -76,7 +76,8 @@ function M.send_event(port, event_type, json_data, token, on_done)
 			if status and status:sub(1, 1) == "2" then
 				finish(true)
 			else
-				finish(false, "the primary answered " .. line)
+				-- Whatever holds the port writes this line, so the notice gets 64 printable bytes.
+				finish(false, "the primary answered " .. line:gsub("[^\32-\126]", ""):sub(1, 64))
 			end
 		end)
 		if not reading then

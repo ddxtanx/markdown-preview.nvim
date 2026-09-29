@@ -1008,9 +1008,29 @@ H.case("Section 8: a scroll push the primary refuses is told once", function()
 end)
 
 H.case("Section 8b: a scroll push nothing answers is told once", function()
-	local notes = secondary_push_notes(free_port())
+	local port = free_port()
+	local notes = secondary_push_notes(port)
 	eq(#notes, 1, "one notice for two pushes nothing answered")
 	eq(notes[1] and notes[1].level, vim.log.levels.WARN, "the notice is a warning")
+	ok(
+		notes[1] ~= nil
+			and vim.startswith(
+				notes[1].msg,
+				("Markdown Preview: could not sync the scroll: the primary on port %d is gone (ECONNREFUSED"):format(
+					port
+				)
+			),
+		"the notice says the primary is gone: " .. tostring(notes[1] and notes[1].msg)
+	)
+end)
+
+H.case("Section 8f: a foreign answer reaches the notice short and printable", function()
+	local notes = secondary_push_notes(stub_primary("HTTP/1.1 418 " .. ("x"):rep(200) .. "\27[31m"))
+	eq(#notes, 1, "one notice for two foreign answers")
+	local msg = notes[1] and notes[1].msg or ""
+	local shown = msg:match("the primary answered (.*)$") or ""
+	ok(#shown > 0 and #shown <= 64, ("the answer shown is at most 64 bytes: %d"):format(#shown))
+	ok(not shown:find("[^\32-\126]"), "the answer shown is printable: " .. vim.inspect(shown))
 end)
 
 H.case("Section 8c: a scroll push the primary accepts says nothing", function()
