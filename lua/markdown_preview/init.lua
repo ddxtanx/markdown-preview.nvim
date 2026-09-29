@@ -907,6 +907,8 @@ function M.start()
 			-- The server goes back to the workspace it served, so the preview
 			-- and its autocmds stay with the last buffer.
 			M._workspace_dir = served_dir
+			-- Takeover's workspace is the one just written, so the next refresh rewrites it.
+			M._last_text_by_buf = {}
 			local back, back_err =
 				pcall(ls_server.update_target, inst, served_dir, vim.fs.joinpath(served_dir, M.config.index_name))
 			if not back then

@@ -726,12 +726,13 @@ H.case("Section 6: a refused start leaves a running preview's files and lock alo
 end)
 calls.start, calls.stop = 0, 0
 
--- vim.uv.fs_open refuses a write of a file whose name ends in suffix until
--- the enclosing case ends, as a full or read-only disk does.
-local function refuse_write(suffix)
+-- vim.uv.fs_open refuses a write of a file whose name begins with name
+-- (its temporary copy included) until the enclosing case ends, as a full
+-- or read-only disk does.
+local function refuse_write(name)
 	local real_open = vim.uv.fs_open
 	vim.uv.fs_open = function(p, flags, ...)
-		if flags == "w" and type(p) == "string" and vim.endswith(p, suffix) then
+		if flags == "w" and type(p) == "string" and vim.startswith(vim.fs.basename(p), name) then
 			return nil, "ENOSPC: no space left on device (stubbed): " .. p, "ENOSPC"
 		end
 		return real_open(p, flags, ...)
@@ -1112,6 +1113,77 @@ for _, bad in ipairs({ '"x"', "0", "70000", "8421.5", "-1" }) do
 		eq(mp._server_instance and mp._server_instance.port, port, "the start serves as the primary")
 	end)
 end
+calls.start, calls.stop = 0, 0
+
+-- A takeover preview of first_buf on a free port, and its content file.
+local function takeover_preview_of_first()
+	mp.setup({ instance_mode = "takeover", port = free_port() })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", port = 18421 })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	vim.api.nvim_buf_set_lines(first_buf, 0, -1, false, { "# doc served first" })
+	mp.start()
+	H.defer(mp.stop)
+	return vim.fs.joinpath(mp._workspace_dir, "content.md")
+end
+
+-- What the running server serves as content.md.
+local function served_content()
+	local inst = mp._server_instance
+	local r = H.http_get(("http://127.0.0.1:%d/content.md?t=%s"):format(inst and inst.port or 0, mp._token or ""))
+	return r.status == 200 and r.body or ("status " .. r.status)
+end
+
+H.case("Section 12: a takeover retarget whose write fails leaves the served text whole", function()
+	local content_file = takeover_preview_of_first()
+	local real_write = vim.uv.fs_write
+	vim.uv.fs_write = function(fd, data, ...)
+		if type(data) == "string" and data:find("# second", 1, true) then
+			return nil, "ENOSPC: no space left on device (stubbed)", "ENOSPC"
+		end
+		return real_write(fd, data, ...)
+	end
+	H.defer(function()
+		vim.uv.fs_write = real_write
+	end)
+	vim.cmd("buffer " .. second_buf)
+	local notes = capture_notes()
+	mp.start()
+	eq(#notes, 1, "one notice for the refused retarget")
+	eq(vim.fn.readblob(content_file), "# doc served first", "content.md still holds the served buffer's text")
+	eq(served_content(), "# doc served first", "the server serves it")
+	local left = {}
+	for name in vim.fs.dir(vim.fs.dirname(content_file)) do
+		if name:find("%.tmp$") then
+			table.insert(left, name)
+		end
+	end
+	eq(table.concat(left, ", "), "", "no temporary file remains")
+end)
+
+H.case("Section 12b: a refresh after a failed takeover retarget writes the served buffer again", function()
+	takeover_preview_of_first()
+	-- A writer that emptied the file before it raised, as a truncating open does.
+	local util = require("markdown_preview.util")
+	local real_text = util.write_text
+	util.write_text = function(path, text)
+		if text:find("# second", 1, true) then
+			real_text(path, "")
+			error("ENOSPC: no space left on device (stubbed)", 0)
+		end
+		return real_text(path, text)
+	end
+	H.defer(function()
+		util.write_text = real_text
+	end)
+	vim.cmd("buffer " .. second_buf)
+	capture_notes()
+	mp.start()
+	vim.cmd("buffer " .. first_buf)
+	mp.refresh()
+	eq(served_content(), "# doc served first", "the refresh serves the first buffer's text again")
+end)
 calls.start, calls.stop = 0, 0
 
 H.finish()

@@ -21,21 +21,34 @@ function M.file_exists(path)
 	return stat and stat.type == "file"
 end
 
--- Raises at level 0, so a notice carries luv's reason and no Lua position.
+-- A served file is replaced by a rename, never truncated by a write that
+-- then fails; raises at level 0, so a notice carries no Lua position.
 function M.write_text(path, text)
 	M.mkdirp(dirname(path))
-	local fd, open_err = vim.uv.fs_open(path, "w", 420) -- 0644
+	local tmp = ("%s.%d.tmp"):format(path, vim.uv.os_getpid())
+	local function fail(err)
+		local removed, remove_err = vim.uv.fs_unlink(tmp)
+		if not removed and not tostring(remove_err):find("ENOENT", 1, true) then
+			err = ("%s (and %s is left: %s)"):format(tostring(err), tmp, tostring(remove_err))
+		end
+		error(tostring(err), 0)
+	end
+	local fd, open_err = vim.uv.fs_open(tmp, "w", 420) -- 0644
 	if not fd then
-		error(tostring(open_err), 0)
+		fail(open_err)
 	end
 	local wrote, write_err = vim.uv.fs_write(fd, text, 0)
-	if not wrote then
+	if wrote ~= #text then
 		vim.uv.fs_close(fd)
-		error(tostring(write_err), 0)
+		fail(wrote and ("short write: %d of %d bytes"):format(wrote, #text) or write_err)
 	end
 	local closed, close_err = vim.uv.fs_close(fd)
 	if not closed then
-		error(tostring(close_err), 0)
+		fail(close_err)
+	end
+	local renamed, rename_err = vim.uv.fs_rename(tmp, path)
+	if not renamed then
+		fail(rename_err)
 	end
 end
 
