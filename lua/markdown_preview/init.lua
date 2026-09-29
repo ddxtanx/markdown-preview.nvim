@@ -453,9 +453,7 @@ local function report_push(what, pushed, err)
 	vim.notify(("Markdown Preview: could not %s: %s"):format(what, tostring(err)), vim.log.levels.WARN)
 end
 
--- A secondary pushes to the primary on its port, and a refusal (a primary
--- restarted with a new token answers 401) repeats on every cursor move, so
--- each kind is told once per primary port.
+-- A refusal repeats on every cursor move, so each kind is told once per primary port.
 local remote_reported = {}
 local function report_remote(what, port, cause)
 	local key = what .. "@" .. tostring(port)
@@ -595,8 +593,7 @@ local function lan_ip()
 	return (addr and addr.ip) or "127.0.0.1"
 end
 
--- live-server's rule where it has one; one that predates it bound "::" as
--- written, and that showed as its loopback too.
+-- A live-server without the rule reports "::" as written, which shows as its loopback too.
 local function wildcard_loopback(ip)
 	if ls_server.wildcard_loopback then
 		-- A caller may replace the rule; one that raises must not fail a started server.
@@ -614,8 +611,7 @@ local function wildcard_loopback(ip)
 	return ip == "::" and "::1" or nil
 end
 
--- The host a URL names for a server bound to bound, bracketed when a colon
--- would read as the port.
+-- An IPv6 literal takes brackets, or its colons read as the port.
 local function display_host(bound)
 	-- 0.0.0.0 shows the LAN address a remote browser reaches, which no probe checks.
 	if bound == "0.0.0.0" then
@@ -629,10 +625,7 @@ local function display_host(bound)
 	return shown
 end
 
--- Build the URL the browser opens to, naming shown. On any other bind than
--- 127.0.0.1 it embeds the auth token so the first request includes it (the
--- page then stashes it in sessionStorage for refreshes). bind_host is the
--- address of the server that serves the page, nil when that is unknown.
+-- Only a 127.0.0.1 bind's index carries the token, so any other bind's URL must.
 local function browser_url(shown, port, bind_host)
 	local base = ("http://%s:%d/"):format(shown, port)
 	-- On a loopback bind the index carries the token (data-live-token), so
@@ -644,8 +637,7 @@ local function browser_url(shown, port, bind_host)
 	return base
 end
 
--- Opens url once the page can load. The URL is taken when the open is
--- scheduled, and a stop in the meantime took the server it names.
+-- The URL is taken when scheduled: a stop before the timer fires takes the server it names.
 local function open_later(url)
 	local inst = M._server_instance
 	vim.defer_fn(function()
@@ -655,9 +647,7 @@ local function open_later(url)
 	end, 200)
 end
 
--- What a stop and a failed start both drop: the autocmds, the token, the
--- workspace pointer, a takeover role, a secondary's included, and the lock
--- this instance wrote, never one another instance holds.
+-- Shared by a stop and every failed start; the lock goes only when this instance wrote it.
 local function forget_session()
 	if M._augroup then
 		pcall(vim.api.nvim_del_augroup_by_id, M._augroup)
@@ -677,8 +667,7 @@ local function forget_session()
 	remote_reported = {}
 end
 
--- A server a start or a retarget cannot finish with: stopped, and the
--- session dropped with it.
+-- A server left listening after a failure would serve the preview, token and all.
 local function abandon(inst)
 	pcall(ls_server.stop, inst)
 	if M._server_instance == inst then
@@ -692,8 +681,7 @@ function M.start()
 	-- What a retarget live-server refuses goes back to.
 	local served_dir = M._workspace_dir
 
-	-- Takeover talks to 127.0.0.1, which a specific-interface bind does not
-	-- answer on; the host is start input, so a running server's retarget skips it.
+	-- Takeover talks to 127.0.0.1, which a specific-interface bind does not answer on.
 	if
 		not M._server_instance
 		and M.config.instance_mode == "takeover"
@@ -762,9 +750,7 @@ function M.start()
 			end
 			return
 		end
-		-- Stale lock or no lock, we become primary. A lock is left for the
-		-- write that follows a start: a probe that timed out reads a live
-		-- primary as gone, and this start then fails on its port.
+		-- A lock is left for the write after the start: a probe that timed out may read a live primary as gone.
 	end
 
 	-- Primary path (takeover) or single-instance (multi). Generate a token
@@ -779,9 +765,7 @@ function M.start()
 		M._token = token
 	end
 
-	-- A running server keeps serving the last buffer until it accepts the
-	-- new root, and a fresh start may share its workspace with another
-	-- instance's server, so nothing is written before a server answers.
+	-- A fresh start may share its workspace with another instance's server, so nothing is written before one answers.
 	local function publish()
 		write_index_if_needed(dir)
 		write_content(dir, text, bufnr)
@@ -863,24 +847,18 @@ function M.start()
 			vim.notify(msg, vim.log.levels.ERROR)
 			return
 		end
-		-- Every later URL and token decision reads the address bound, which
-		-- live-server reports canonical ("localhost" binds 127.0.0.1), not a
-		-- host a setup() may have changed since.
+		-- A setup() may change the host while the server runs; what it bound does not change.
 		M._bound_host = inst.host or asked_host
-		-- A raise from here on stops the server again and fails the start as
-		-- a busy port does: a primary without its files, its lock or its
-		-- autocmds left a listening server, a raw Lua error and no browser.
+		-- A raise past the listen left a listening server, a raw Lua error and no browser.
 		local finished, finish_err = pcall(function()
 			publish()
-			-- The lock names the port the server got, so it is written once
-			-- the server listens.
+			-- The lock names the port the server got.
 			if M.config.instance_mode == "takeover" then
 				-- Owned from the write on: a write that fails may leave the file it opened.
 				M._lock_owned = true
 				require("markdown_preview.lock").write(inst.port, dir, M._token, M._bound_host)
 			end
-			-- Armed only once a server answers, so a failed start leaves no
-			-- autocmd refreshing a preview that does not exist.
+			-- Armed last, so a failed start leaves no autocmd refreshing nothing.
 			set_autocmds_for_buffer(bufnr)
 		end)
 		if not finished then
@@ -920,8 +898,7 @@ function M.start()
 		local inst = M._server_instance
 		local published, publish_err = pcall(publish)
 		if not published then
-			-- The server goes back to the workspace it served, so the preview
-			-- and its autocmds stay with the last buffer.
+			-- The last buffer stays armed, so the server goes back to what it served.
 			M._workspace_dir = served_dir
 			-- Takeover's workspace is the one just written, so the next refresh rewrites it.
 			M._last_text_by_buf = {}
@@ -941,8 +918,7 @@ function M.start()
 			vim.notify("Markdown Preview: could not retarget: " .. tostring(publish_err), vim.log.levels.ERROR)
 			return
 		end
-		-- The last buffer's autocmds went with the group, so a preview that
-		-- nothing refreshes is stopped.
+		-- The last buffer's autocmds went with the group: nothing would refresh the preview.
 		local armed, arm_err = pcall(set_autocmds_for_buffer, bufnr)
 		if not armed then
 			abandon(inst)
@@ -952,8 +928,7 @@ function M.start()
 			)
 			return
 		end
-		-- live-server's own warning names the cause, where there is one. An
-		-- edit here still refreshes: this plugin pushes its own reload.
+		-- An edit here still refreshes: this plugin pushes its own reload.
 		if watching == false then
 			vim.notify(
 				"Markdown Preview: the server reports file watching off; changes made outside this editor may not refresh the preview",

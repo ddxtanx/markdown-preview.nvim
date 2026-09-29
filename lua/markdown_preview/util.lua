@@ -21,8 +21,7 @@ function M.file_exists(path)
 	return stat and stat.type == "file"
 end
 
--- A served file is replaced by a rename, never truncated by a write that
--- then fails; raises at level 0, so a notice carries no Lua position.
+-- A rename, never a truncating open: a failed write must not empty a file being served.
 function M.write_text(path, text)
 	M.mkdirp(dirname(path))
 	local tmp = ("%s.%d.tmp"):format(path, vim.uv.os_getpid())

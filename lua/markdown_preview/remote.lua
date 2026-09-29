@@ -6,10 +6,7 @@ local M = {}
 -- How long a push waits for the primary's status line.
 M.timeout_ms = 2000
 
--- Pushes one event through the primary's inject endpoint. on_done(true)
--- follows a 2xx status line, on_done(false, cause) any other answer, a
--- refused connect or silence past the bound; it runs in a luv callback.
--- The socket and the timer are closed on every path.
+-- on_done(sent, cause) runs in a luv callback, where most of the API is refused.
 function M.send_event(port, event_type, json_data, token, on_done)
 	local tcp, timer
 	local finished = false
