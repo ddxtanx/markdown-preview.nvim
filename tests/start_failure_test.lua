@@ -876,4 +876,111 @@ H.case("Section 7f: a retarget that cannot go back either stops the server", fun
 end)
 calls.start, calls.stop = 0, 0
 
+-- A primary that answers every request with status_line and closes, on an
+-- OS-assigned port, until the enclosing case ends.
+local function stub_primary(status_line)
+	local srv, srv_err = vim.uv.new_tcp()
+	if not srv then
+		error("stub_primary: " .. tostring(srv_err), 0)
+	end
+	H.defer(function()
+		srv:close()
+	end)
+	local bound, bind_err = srv:bind("127.0.0.1", 0)
+	if not bound then
+		error("stub_primary: " .. tostring(bind_err), 0)
+	end
+	local listening, listen_err = srv:listen(8, function(err)
+		if err then
+			return
+		end
+		local conn = vim.uv.new_tcp()
+		if not conn then
+			return
+		end
+		if not srv:accept(conn) then
+			conn:close()
+			return
+		end
+		local head = ""
+		conn:read_start(function(read_err, chunk)
+			head = head .. (chunk or "")
+			if read_err or not chunk or head:find("\r\n\r\n", 1, true) then
+				conn:read_stop()
+				local answer = status_line .. "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+				if not conn:write(answer, function()
+					conn:close()
+				end) then
+					conn:close()
+				end
+			end
+		end)
+	end)
+	if not listening then
+		error("stub_primary: " .. tostring(listen_err), 0)
+	end
+	local name, name_err = srv:getsockname()
+	if not name then
+		error("stub_primary: " .. tostring(name_err), 0)
+	end
+	return name.port
+end
+
+-- The notices a takeover secondary of the primary on port makes for two
+-- scroll pushes, read once every push has had its answer.
+local function secondary_push_notes(port)
+	local lock = require("markdown_preview.lock")
+	local real_read, real_alive = lock.read, lock.is_server_alive
+	H.defer(function()
+		lock.read, lock.is_server_alive = real_read, real_alive
+	end)
+	lock.read = function()
+		return { port = port, token = "peer", host = "127.0.0.1" }
+	end
+	lock.is_server_alive = function()
+		return true
+	end
+	mp.setup({ instance_mode = "takeover", port = free_port() })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", port = 18421 })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	vim.api.nvim_buf_set_lines(first_buf, 0, -1, false, { "# doc", "", "a", "b", "c" })
+	mp.start()
+	H.defer(mp.stop)
+	eq(mp._takeover_port, port, "the start joins the primary as a secondary")
+	local notes = capture_notes()
+	for _, line in ipairs({ 2, 4 }) do
+		vim.api.nvim_win_set_cursor(0, { line, 0 })
+		vim.api.nvim_exec_autocmds("CursorMoved", { buffer = first_buf })
+	end
+	-- Each push ends by its answer or its bound, whichever comes first.
+	vim.wait(3000, function()
+		return false
+	end)
+	return notes
+end
+
+H.case("Section 8: a scroll push the primary refuses is told once", function()
+	local notes = secondary_push_notes(stub_primary("HTTP/1.1 401 Unauthorized"))
+	eq(#notes, 1, "one notice for two refused pushes")
+	eq(notes[1] and notes[1].level, vim.log.levels.WARN, "the notice is a warning")
+	ok(
+		notes[1] ~= nil and notes[1].msg:find("401", 1, true) ~= nil,
+		"the notice names the refusal: " .. tostring(notes[1] and notes[1].msg)
+	)
+end)
+
+H.case("Section 8b: a scroll push nothing answers is told once", function()
+	local notes = secondary_push_notes(free_port())
+	eq(#notes, 1, "one notice for two pushes nothing answered")
+	eq(notes[1] and notes[1].level, vim.log.levels.WARN, "the notice is a warning")
+end)
+
+H.case("Section 8c: a scroll push the primary accepts says nothing", function()
+	local notes = secondary_push_notes(stub_primary("HTTP/1.1 200 OK"))
+	eq(#notes, 0, "no notice for accepted pushes")
+end)
+calls.start, calls.stop = 0, 0
+
 H.finish()

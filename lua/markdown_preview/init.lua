@@ -453,6 +453,19 @@ local function report_push(what, pushed, err)
 	vim.notify(("Markdown Preview: could not %s: %s"):format(what, tostring(err)), vim.log.levels.WARN)
 end
 
+-- A secondary pushes to the primary on its port, and a refusal (a primary
+-- restarted with a new token answers 401) repeats on every cursor move, so
+-- each kind is told once per primary port.
+local remote_reported = {}
+local function report_remote(what, port, cause)
+	local key = what .. "@" .. tostring(port)
+	if remote_reported[key] then
+		return
+	end
+	remote_reported[key] = true
+	vim.notify(("Markdown Preview: could not %s: %s"):format(what, tostring(cause)), vim.log.levels.WARN)
+end
+
 local function maybe_refresh(bufnr, silent)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
@@ -511,7 +524,14 @@ local function send_scroll_sync(bufnr)
 	if M._server_instance then
 		report_push("sync the scroll", pcall(ls_server.send_event, M._server_instance, "scroll", payload))
 	elseif M._takeover_port then
-		require("markdown_preview.remote").send_event(M._takeover_port, "scroll", payload, M._token)
+		local port = M._takeover_port
+		require("markdown_preview.remote").send_event(port, "scroll", payload, M._token, function(sent, cause)
+			if not sent then
+				vim.schedule(function()
+					report_remote("sync the scroll", port, cause)
+				end)
+			end
+		end)
 	end
 end
 
