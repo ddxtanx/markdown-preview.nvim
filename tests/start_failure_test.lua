@@ -1275,4 +1275,29 @@ H.case("Section 14: a workspace that cannot be created fails the start with one 
 end)
 calls.start, calls.stop = 0, 0
 
+H.case("Section 7g: a retarget whose autocmds cannot be armed stops the server with one notice", function()
+	vim.cmd("buffer " .. first_buf)
+	mp.setup({ port = free_port() })
+	H.defer(function()
+		mp.setup({
+			port = 18421,
+			auto_refresh_events = { "InsertLeave", "TextChanged", "TextChangedI", "BufWritePost" },
+		})
+	end)
+	mp.start()
+	H.defer(mp.stop)
+	local port = mp._server_instance and mp._server_instance.port or 0
+	mp.setup({ auto_refresh_events = { "NoSuchEvent" } })
+	vim.cmd("buffer " .. second_buf)
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	one_clean_error(notes, "Markdown Preview: could not retarget: auto_refresh_events:")
+	eq(mp._server_instance, nil, "no server instance is kept")
+	ok(port_free(port), "the server is stopped: its port binds again")
+	eq(armed(), 0, "no autocmd is armed")
+	eq(mp._token, nil, "no token is kept")
+end)
+calls.start, calls.stop = 0, 0
+
 H.finish()
