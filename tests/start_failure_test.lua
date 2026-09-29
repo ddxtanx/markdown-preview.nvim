@@ -1491,6 +1491,30 @@ H.case("Section 16: a write's temporary file is never served", function()
 end)
 calls.start, calls.stop = 0, 0
 
+H.case("Section 16b: a temporary in a subfolder sits behind the token gate", function()
+	local row = "a subfolder's temporary answers 401 without the token on a live-server without the dot rule"
+	if ls_server.features and ls_server.features.start_raises then
+		H.skip("16b: " .. row .. " (this live-server's dot rule answers 404 first)")
+		return
+	end
+	mp.setup({ port = free_port() })
+	H.defer(function()
+		mp.setup({ port = 18421 })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	mp.start()
+	H.defer(mp.stop)
+	local sub = vim.fs.joinpath(mp._workspace_dir, "sub")
+	vim.fn.mkdir(sub, "p")
+	-- A content_name with a slash, or a link that resolves below the root, writes one here.
+	H.write_file(vim.fs.joinpath(sub, ".content.md.4242.tmp"), "# held")
+	H.defer(function()
+		vim.fn.delete(sub, "rf")
+	end)
+	local port = mp._server_instance and mp._server_instance.port or 0
+	eq(H.http_get(("http://127.0.0.1:%d/sub/.content.md.4242.tmp"):format(port)).status, 401, row)
+end)
+
 H.case("Section 17: a write keeps what its target was", function()
 	local util = require("markdown_preview.util")
 	local dir = H.tmpdir()
