@@ -593,6 +593,8 @@ local function lan_ip()
 	return (addr and addr.ip) or "127.0.0.1"
 end
 
+local rule_reported = setmetatable({}, { __mode = "k" })
+
 -- A live-server without the rule reports "::" as written, which shows as its loopback too.
 local function wildcard_loopback(ip)
 	if ls_server.wildcard_loopback then
@@ -601,11 +603,16 @@ local function wildcard_loopback(ip)
 		if ruled then
 			return loopback
 		end
-		vim.notify(
-			"Markdown Preview: live-server's wildcard rule raised, so the URL names the address bound: "
-				.. tostring(loopback),
-			vim.log.levels.WARN
-		)
+		-- Every retarget builds a URL, so a rule that keeps raising is told once per server.
+		local inst = M._server_instance or M
+		if not rule_reported[inst] then
+			rule_reported[inst] = true
+			vim.notify(
+				"Markdown Preview: live-server's wildcard rule raised, so the URL names the address bound: "
+					.. tostring(loopback),
+				vim.log.levels.WARN
+			)
+		end
 		return nil
 	end
 	return ip == "::" and "::1" or nil

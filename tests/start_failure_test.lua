@@ -1615,4 +1615,40 @@ for _, shape in ipairs({
 end
 calls.start, calls.stop = 0, 0
 
+H.case("Section 15b: a wildcard rule that raises is told once per server", function()
+	local real_start, real_rule = ls_server.start, ls_server.wildcard_loopback
+	local raising = false
+	stub("start", function(...)
+		local inst = real_start(...)
+		raising = true
+		return inst
+	end)
+	stub("wildcard_loopback", function(ip)
+		if raising then
+			error("a replaced rule broke", 0)
+		end
+		return real_rule(ip)
+	end)
+	mp.setup({ port = free_port() })
+	H.defer(function()
+		mp.setup({ port = 18421 })
+	end)
+	local notes = capture_notes()
+	vim.cmd("buffer " .. first_buf)
+	mp.start()
+	H.defer(mp.stop)
+	vim.cmd("buffer " .. second_buf)
+	mp.start()
+	vim.cmd("buffer " .. first_buf)
+	mp.start()
+	local warned = 0
+	for _, n in ipairs(notes) do
+		if n.msg:find("wildcard rule raised", 1, true) then
+			warned = warned + 1
+		end
+	end
+	eq(warned, 1, "one warning over a start and two retargets")
+end)
+calls.start, calls.stop = 0, 0
+
 H.finish()
