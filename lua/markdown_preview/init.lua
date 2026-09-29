@@ -663,6 +663,8 @@ local function forget_session()
 	M._takeover_port = nil
 	M._token = nil
 	M._bound_host = nil
+	-- A preview joined again may meet a primary restarted with another token.
+	remote_reported = {}
 end
 
 -- A server a start or a retarget cannot finish with: stopped, and the
