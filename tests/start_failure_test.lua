@@ -882,14 +882,22 @@ H.case("Section 7f: a retarget that cannot go back either stops the server", fun
 end)
 calls.start, calls.stop = 0, 0
 
--- A primary that answers every request with status_line and closes, on an
--- OS-assigned port, until the enclosing case ends.
+-- A primary on an OS-assigned port until the enclosing case ends: it
+-- answers every request with status_line and closes, or with none holds
+-- the connection open. Returns its port and how many connections it holds.
 local function stub_primary(status_line)
+	local held = 0
 	local srv, srv_err = vim.uv.new_tcp()
 	if not srv then
 		error("stub_primary: " .. tostring(srv_err), 0)
 	end
+	local conns = {}
 	H.defer(function()
+		for _, conn in ipairs(conns) do
+			if not conn:is_closing() then
+				conn:close()
+			end
+		end
 		srv:close()
 	end)
 	local bound, bind_err = srv:bind("127.0.0.1", 0)
@@ -906,6 +914,11 @@ local function stub_primary(status_line)
 		end
 		if not srv:accept(conn) then
 			conn:close()
+			return
+		end
+		table.insert(conns, conn)
+		if not status_line then
+			held = held + 1
 			return
 		end
 		local head = ""
@@ -929,12 +942,22 @@ local function stub_primary(status_line)
 	if not name then
 		error("stub_primary: " .. tostring(name_err), 0)
 	end
-	return name.port
+	return name.port, function()
+		return held
+	end
 end
 
 -- The notices a takeover secondary of the primary on port makes for two
--- scroll pushes, read once every push has had its answer.
-local function secondary_push_notes(port)
+-- scroll pushes under a 500 ms bound, and whether every push's socket and
+-- timer were closed by then (held counts the stub's own open sockets). A
+-- 200 ms bound read a loaded box's 401 as silence once (measured).
+local function secondary_push_notes(port, held)
+	local remote = require("markdown_preview.remote")
+	local real_bound = remote.timeout_ms
+	remote.timeout_ms = 500
+	H.defer(function()
+		remote.timeout_ms = real_bound
+	end)
 	local lock = require("markdown_preview.lock")
 	local real_read, real_alive = lock.read, lock.is_server_alive
 	H.defer(function()
@@ -955,13 +978,20 @@ local function secondary_push_notes(port)
 	mp.start()
 	H.defer(mp.stop)
 	eq(mp._takeover_port, port, "the start joins the primary as a secondary")
+	local tcp_before, timers_before = H.handle_count("tcp"), H.handle_count("timer")
 	local notes = capture_notes()
 	for _, line in ipairs({ 2, 4 }) do
 		vim.api.nvim_win_set_cursor(0, { line, 0 })
 		vim.api.nvim_exec_autocmds("CursorMoved", { buffer = first_buf })
 	end
-	-- Each push ends by its answer or its bound, whichever comes first.
-	vim.wait(3000, function()
+	-- Each push ends by its answer or its bound; a closed socket and timer mark the end.
+	local function settled()
+		local stub_held = held and held() or 0
+		return H.handle_count("tcp") == tcp_before + stub_held and H.handle_count("timer") == timers_before
+	end
+	ok(H.wait_for(settled, 2000), "every push's socket and timer are closed within 2 s")
+	-- The notice is scheduled from the push's callback.
+	vim.wait(20, function()
 		return false
 	end)
 	return notes
@@ -986,6 +1016,15 @@ end)
 H.case("Section 8c: a scroll push the primary accepts says nothing", function()
 	local notes = secondary_push_notes(stub_primary("HTTP/1.1 200 OK"))
 	eq(#notes, 0, "no notice for accepted pushes")
+end)
+
+H.case("Section 8d: a scroll push a silent primary never answers ends at its bound", function()
+	local notes = secondary_push_notes(stub_primary(nil))
+	eq(#notes, 1, "one notice for two unanswered pushes")
+	ok(
+		notes[1] ~= nil and notes[1].msg:find("no answer", 1, true) ~= nil,
+		"the notice says no answer came: " .. tostring(notes[1] and notes[1].msg)
+	)
 end)
 calls.start, calls.stop = 0, 0
 
