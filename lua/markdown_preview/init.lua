@@ -736,10 +736,16 @@ function M.start()
 		})
 		if not ok then
 			forget_session()
-			vim.notify(
-				("Markdown Preview: failed to start server (port %s): %s"):format(tostring(port), tostring(inst)),
-				vim.log.levels.ERROR
-			)
+			local reason = tostring(inst)
+			local msg = ("Markdown Preview: failed to start server (port %s): %s"):format(tostring(port), reason)
+			-- Every refusal live-server gives for a held port carries luv's EADDRINUSE name.
+			if reason:find("EADDRINUSE", 1, true) then
+				msg = (
+					"Markdown Preview: port %s is in use by another program. Set port to a free one in setup(), "
+					.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.'
+				):format(tostring(port))
+			end
+			vim.notify(msg, vim.log.levels.ERROR)
 			return
 		end
 		-- The lock names the port the server got, so it is written once the

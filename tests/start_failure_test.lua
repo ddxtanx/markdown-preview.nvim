@@ -98,10 +98,17 @@ local function stub(name, fn)
 end
 
 H.section("Section 1: a start that raises leaves no state behind")
-local failed_notes = start_raising("cannot listen on 127.0.0.1:18421: EADDRINUSE: address already in use")
+local failed_notes = start_raising("Failed to bind 127.0.0.1:18421: EADDRINUSE: address already in use")
 eq(#failed_notes, 1, "one notice for the failed start")
 eq(failed_notes[1] and failed_notes[1].level, vim.log.levels.ERROR, "the notice is an error")
-ok(failed_notes[1] and failed_notes[1].msg:find("(port 18421)", 1, true), "the notice names the port")
+ok(
+	failed_notes[1] ~= nil and failed_notes[1].msg:find("port 18421 is in use", 1, true) ~= nil,
+	"the notice names the taken port: " .. tostring(failed_notes[1] and failed_notes[1].msg)
+)
+ok(
+	failed_notes[1] ~= nil and failed_notes[1].msg:find('instance_mode = "multi"', 1, true) ~= nil,
+	"and the setting that avoids it"
+)
 eq(armed(), 0, "no autocmd is armed")
 eq(mp._token, nil, "the token is cleared")
 eq(mp._workspace_dir, nil, "the workspace is cleared")
@@ -169,6 +176,58 @@ H.case("Section 1c: the start after a failed one arms, serves and opens the brow
 	eq(r.status, 200, "the content is served with the new token")
 end)
 calls.start, calls.stop = 0, 0
+
+H.case("Section 1c2: any other start failure keeps the generic notice", function()
+	local notes = start_raising("Failed to bind 127.0.0.1:18421: EACCES: permission denied")
+	eq(#notes, 1, "one notice for the failed start")
+	eq(
+		notes[1] and notes[1].msg,
+		"Markdown Preview: failed to start server (port 18421): Failed to bind 127.0.0.1:18421: EACCES: permission denied",
+		"the notice names the port and carries the reason"
+	)
+end)
+
+-- A port another program listens on, for the start to meet the real refusal.
+local function held_port(addr)
+	local tcp = vim.uv.new_tcp()
+	local bound, bind_err = tcp:bind(addr, 0)
+	if not bound then
+		error("held_port: " .. tostring(bind_err), 0)
+	end
+	local listening, listen_err = tcp:listen(8, function() end)
+	if not listening then
+		error("held_port: " .. tostring(listen_err), 0)
+	end
+	H.defer(function()
+		tcp:close()
+	end)
+	return tcp:getsockname().port
+end
+
+for _, shape in ipairs({
+	{ held = "127.0.0.1", host = "127.0.0.1", what = "the same address" },
+	{ held = "0.0.0.0", host = "127.0.0.1", what = "a wildcard" },
+	{ held = "127.0.0.1", host = "0.0.0.0", what = "the loopback address a wildcard start names" },
+}) do
+	H.case("Section 1c3: a port held on " .. shape.what .. " is named with its fix", function()
+		local port = held_port(shape.held)
+		mp.setup({ host = shape.host, port = port })
+		H.defer(function()
+			mp.setup({ host = "127.0.0.1", port = 18421 })
+		end)
+		local notes = capture_notes()
+		mp.start()
+		eq(#notes, 1, "one notice for the failed start")
+		eq(notes[1] and notes[1].level, vim.log.levels.ERROR, "the notice is an error")
+		eq(
+			notes[1] and notes[1].msg,
+			("Markdown Preview: port %d is in use by another program. Set port to a free one in setup(), "):format(port)
+				.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.',
+			"the notice names the port and the settings that avoid it"
+		)
+		eq(mp._server_instance, nil, "no server instance is kept")
+	end)
+end
 
 H.case("Section 1d: a failed start drops a takeover secondary's role", function()
 	local lock = require("markdown_preview.lock")

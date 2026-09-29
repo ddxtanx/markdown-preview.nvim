@@ -12,6 +12,7 @@ All notable changes to this project; versions follow SemVer. From `[Unreleased]`
 
 - The start-failure notification reads `Markdown Preview: failed to start server (port <port>): <reason>`.
 - `vim.uv` replaces the deprecated `vim.loop` throughout.
+- When the port is taken by another program, the start-failure notification says so and how to pick another: `Markdown Preview: port <port> is in use by another program. ...`.
 
 ### Removed
 
