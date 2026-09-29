@@ -116,6 +116,7 @@ M._last_scroll_line = nil
 M._is_primary = nil -- true/false/nil (takeover mode)
 M._takeover_port = nil -- port of primary server (secondary uses for HTTP events)
 M._token = nil -- live-server auth token (primary owns; secondaries read from lockfile)
+M._bound_host = nil -- the address the primary's server bound, as live-server reports it
 
 local function effective_port()
 	if M.config.port ~= 0 then
@@ -129,10 +130,6 @@ end
 
 local function is_loopback(host)
 	return host == "127.0.0.1" or host == "localhost"
-end
-
-local function host_is_loopback()
-	return is_loopback(M.config.host)
 end
 
 ---------------------------------------------------------------------------
@@ -178,7 +175,7 @@ local function write_index(dir)
 	-- served to any peer that can reach the port, and a baked token would
 	-- defeat the auth entirely (the browser gets it via ?t= instead).
 	content = content:gsub('data%-live%-token="__LIVE_TOKEN__"', function()
-		return 'data-live-token="' .. (host_is_loopback() and M._token or "") .. '"'
+		return 'data-live-token="' .. (is_loopback(M._bound_host) and M._token or "") .. '"'
 	end)
 	content = content:gsub("__THEME__", function()
 		return M.config.default_theme
@@ -223,7 +220,7 @@ local function write_index_if_needed(dir)
 	-- session serves. Covers a fresh token after restart AND a loopback<->
 	-- network switch (which flips whether the token is baked at all): a stale
 	-- non-empty token on a network bind would otherwise 401 every request.
-	local want = 'data-live-token="' .. (host_is_loopback() and (M._token or "") or "") .. '"'
+	local want = 'data-live-token="' .. (is_loopback(M._bound_host) and (M._token or "") or "") .. '"'
 	local ok, existing = pcall(util.read_text, dst)
 	if not ok or not existing:find(want, 1, true) then
 		return write_index(dir)
@@ -573,22 +570,36 @@ local function lan_ip()
 	return (addr and addr.ip) or "127.0.0.1"
 end
 
--- Build the URL the browser opens to. On any other bind than 127.0.0.1 or
--- localhost it embeds the auth token so the first request includes it (the
--- page then stashes it in sessionStorage for refreshes). bind_host is the
--- host of the server that serves the page, nil when that is unknown.
-local function browser_url(port, bind_host)
+-- live-server's rule where it has one; one that predates it bound "::" as
+-- written, and that showed as its loopback too.
+local function wildcard_loopback(ip)
+	if ls_server.wildcard_loopback then
+		return ls_server.wildcard_loopback(ip)
+	end
+	return ip == "::" and "::1" or nil
+end
+
+-- The host a URL names for a server bound to bound, bracketed when a colon
+-- would read as the port.
+local function display_host(bound)
 	-- 0.0.0.0 shows the LAN address a remote browser reaches, which no probe checks.
-	local display_host = (M.config.host == "0.0.0.0") and lan_ip() or M.config.host
-	-- The IPv6 wildcard shows its loopback, as live-server's own URL does.
-	if display_host == "::" then
-		display_host = "::1"
+	if bound == "0.0.0.0" then
+		return lan_ip()
 	end
-	-- An IPv6 literal takes brackets in a URL, or its colons read as the port.
-	if display_host:find(":", 1, true) then
-		display_host = "[" .. display_host .. "]"
+	local shown = wildcard_loopback(bound) or bound
+	shown = shown:match("^::[fF][fF][fF][fF]:(%d+%.%d+%.%d+%.%d+)$") or shown
+	if shown:find(":", 1, true) then
+		shown = "[" .. shown .. "]"
 	end
-	local base = ("http://%s:%d/"):format(display_host, port)
+	return shown
+end
+
+-- Build the URL the browser opens to, naming shown. On any other bind than
+-- 127.0.0.1 it embeds the auth token so the first request includes it (the
+-- page then stashes it in sessionStorage for refreshes). bind_host is the
+-- address of the server that serves the page, nil when that is unknown.
+local function browser_url(shown, port, bind_host)
+	local base = ("http://%s:%d/"):format(shown, port)
 	-- On a loopback bind the index carries the token (data-live-token), so
 	-- the URL leaves it out of history, the address bar and a shared
 	-- screen; any other bind's page has no other way to get it.
@@ -610,6 +621,7 @@ local function forget_session()
 	M._is_primary = nil
 	M._takeover_port = nil
 	M._token = nil
+	M._bound_host = nil
 end
 
 function M.start()
@@ -621,7 +633,7 @@ function M.start()
 	-- 127.0.0.1, which a specific-interface bind does not answer on. Only
 	-- loopback and the wildcard are supported there; multi mode has no such
 	-- coupling and accepts any bind address.
-	if M.config.instance_mode == "takeover" and not host_is_loopback() and M.config.host ~= "0.0.0.0" then
+	if M.config.instance_mode == "takeover" and not is_loopback(M.config.host) and M.config.host ~= "0.0.0.0" then
 		vim.notify(
 			'Markdown Preview: takeover mode supports host = "127.0.0.1" or "0.0.0.0" only.\n'
 				.. 'Use "0.0.0.0" for LAN access, or instance_mode = "multi" to bind a specific interface.',
@@ -656,6 +668,7 @@ function M.start()
 			-- instance. Adopt its token so our scroll-sync RPC works. The
 			-- primary's bind decides whether its index carries the token; a
 			-- lock from an older primary has no host, so the URL keeps it.
+			-- The URL names 127.0.0.1, where the probe above reached it.
 			M._is_primary = false
 			M._takeover_port = lock_data.port
 			M._token = lock_data.token
@@ -663,7 +676,7 @@ function M.start()
 			M._last_text_by_buf[bufnr] = text
 			set_autocmds_for_buffer(bufnr)
 			if type(M.config.hooks.on_start) == "function" then
-				M.config.hooks.on_start(browser_url(lock_data.port, lock_data.host))
+				M.config.hooks.on_start(browser_url("127.0.0.1", lock_data.port, lock_data.host))
 			end
 			return
 		end
@@ -696,7 +709,7 @@ function M.start()
 	-- The asset_root sidecar is gated too: it holds the source file's
 	-- directory path, which is nobody's business but ours.
 	local protected = { content_path_pattern, "^/asset_root$" }
-	if not host_is_loopback() then
+	if not is_loopback(M.config.host) then
 		-- On a network bind the index page must be gated too: it is the
 		-- browser's bootstrap document, and serving it openly would hand the
 		-- preview to any peer that can reach the port. The tokenized ?t= URL
@@ -721,9 +734,10 @@ function M.start()
 	if not M._server_instance then
 		local port = effective_port()
 		local index_path = vim.fs.joinpath(dir, M.config.index_name)
+		local asked_host = M.config.host
 		local ok, inst = pcall(ls_server.start, {
 			port = port,
-			host = M.config.host,
+			host = asked_host,
 			root = dir,
 			default_index = index_path,
 			headers = { ["Cache-Control"] = "no-cache" },
@@ -767,13 +781,19 @@ function M.start()
 			vim.notify(msg, vim.log.levels.ERROR)
 			return
 		end
+		-- Every later URL and token decision reads the address bound, which
+		-- live-server reports canonical ("localhost" binds 127.0.0.1), not a
+		-- host a setup() may have changed since.
+		M._bound_host = inst.host or asked_host
+		-- The index went out before the bound address was known.
+		write_index_if_needed(dir)
 		-- The lock names the port the server got, so it is written once the
 		-- server listens. A lock that cannot be made private stops the server
 		-- again and fails the start as a busy port does: a primary without
 		-- its lock left a listening server, a raw Lua error and no browser.
 		if M.config.instance_mode == "takeover" then
 			local lock = require("markdown_preview.lock")
-			local locked, lock_err = pcall(lock.write, inst.port, dir, M._token, M.config.host)
+			local locked, lock_err = pcall(lock.write, inst.port, dir, M._token, M._bound_host)
 			if not locked then
 				pcall(ls_server.stop, inst)
 				lock.remove()
@@ -796,12 +816,15 @@ function M.start()
 		set_autocmds_for_buffer(bufnr)
 
 		if type(M.config.hooks.on_start) == "function" then
-			M.config.hooks.on_start(browser_url(inst.port, M.config.host))
+			M.config.hooks.on_start(browser_url(display_host(M._bound_host), inst.port, M._bound_host))
 		end
 
 		if M.config.open_browser then
 			vim.defer_fn(function()
-				util.open_in_browser(browser_url(inst.port, M.config.host), M.config.browser)
+				util.open_in_browser(
+					browser_url(display_host(M._bound_host), inst.port, M._bound_host),
+					M.config.browser
+				)
 			end, 200)
 		end
 	else
@@ -827,13 +850,16 @@ function M.start()
 		report_push("reload the preview", pcall(ls_server.reload, M._server_instance, M.config.content_name))
 
 		if type(M.config.hooks.on_start) == "function" then
-			M.config.hooks.on_start(browser_url(M._server_instance.port, M.config.host))
+			M.config.hooks.on_start(browser_url(display_host(M._bound_host), M._server_instance.port, M._bound_host))
 		end
 
 		-- No browser tab connected (user closed it)? Re-open.
 		if M.config.open_browser and ls_server.connected_client_count(M._server_instance) == 0 then
 			vim.defer_fn(function()
-				util.open_in_browser(browser_url(M._server_instance.port, M.config.host), M.config.browser)
+				util.open_in_browser(
+					browser_url(display_host(M._bound_host), M._server_instance.port, M._bound_host),
+					M.config.browser
+				)
 			end, 200)
 		end
 	end

@@ -290,6 +290,12 @@ if v6 then
 		any_url:match("^http://%[::1%]:%d+/%?t=%x+$") ~= nil,
 		"an IPv6 wildcard bind yields http://[::1]:<port>/?t=<token>: " .. any_url
 	)
+	-- Any spelling of the wildcard is bound as "::", so it opens [::1] too.
+	local long_url = url_for("0:0:0:0:0:0:0:0")
+	ok(
+		long_url:match("^http://%[::1%]:%d+/%?t=%x+$") ~= nil,
+		"a 0:0:0:0:0:0:0:0 bind yields http://[::1]:<port>/?t=<token>: " .. long_url
+	)
 	-- The loopback set stays 127.0.0.1 and localhost, the address takeover talks to.
 	mp.setup({ open_browser = false, instance_mode = "multi", port = 0, host = "::1" })
 	mp.start()
@@ -306,6 +312,7 @@ if v6 then
 else
 	H.skip("an IPv6 loopback bind yields http://[::1]:<port>/?t=<token> (no IPv6 loopback here)")
 	H.skip("an IPv6 wildcard bind yields http://[::1]:<port>/?t=<token> (no IPv6 loopback here)")
+	H.skip("a 0:0:0:0:0:0:0:0 bind yields http://[::1]:<port>/?t=<token> (no IPv6 loopback here)")
 	H.skip("a ::1 bind answers 401 without the token and 200 with it (no IPv6 loopback here)")
 	H.skip("a ::1 bind bakes no token into its index (no IPv6 loopback here)")
 end
@@ -314,10 +321,92 @@ end
 -- a network bind's page has no other source.
 local loop_url = url_for("127.0.0.1")
 ok(loop_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil, "a loopback bind's URL has no ?t=: " .. loop_url)
+-- localhost binds 127.0.0.1, and a browser tries localhost's ::1 first,
+-- where another program may listen, so the URL names the address bound.
 local localhost_url = url_for("localhost")
-ok(localhost_url:match("^http://localhost:%d+/$") ~= nil, "a localhost bind's URL has no ?t=: " .. localhost_url)
+ok(
+	localhost_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil,
+	"a localhost bind opens 127.0.0.1 with no ?t=: " .. localhost_url
+)
 local net_url = url_for("0.0.0.0")
 ok(net_url:find("?t=", 1, true) ~= nil, "a network bind's URL keeps ?t=: " .. net_url)
+-- An IPv4-mapped bind is named by its IPv4 address, and it is no 127.0.0.1
+-- bind, so its index is gated and the URL keeps the token.
+local mapped_probe = uv.new_tcp()
+local mapped_bound, mapped_err = mapped_probe:bind("::ffff:127.0.0.1", 0)
+mapped_probe:close()
+if mapped_bound then
+	local mapped_url = url_for("::ffff:127.0.0.1")
+	ok(
+		mapped_url:match("^http://127%.0%.0%.1:%d+/%?t=%x+$") ~= nil,
+		"a ::ffff:127.0.0.1 bind opens http://127.0.0.1:<port>/?t=<token>: " .. mapped_url
+	)
+else
+	H.skip(
+		"a ::ffff:127.0.0.1 bind opens http://127.0.0.1:<port>/?t=<token> (the bind fails: "
+			.. tostring(mapped_err)
+			.. ")"
+	)
+end
+
+-- lan_ip() names the address a UDP connect picks; a fake socket picks it here.
+local function lan_reads(ip)
+	local real = uv.new_udp
+	uv.new_udp = function()
+		return {
+			connect = function()
+				return 0
+			end,
+			getsockname = function()
+				return { ip = ip }
+			end,
+			close = function() end,
+		}
+	end
+	H.defer(function()
+		uv.new_udp = real
+	end)
+end
+
+H.case("Section 6b: a wildcard bind opens the LAN address with the token", function()
+	lan_reads("192.0.2.7")
+	local url = url_for("0.0.0.0")
+	ok(url:match("^http://192%.0%.2%.7:%d+/%?t=%x+$") ~= nil, "a 0.0.0.0 bind opens the LAN address with ?t=: " .. url)
+end)
+
+H.case("Section 6c: a host changed while the server runs leaves the URL to the bound address", function()
+	lan_reads("127.0.0.1")
+	local url
+	mp.setup({
+		open_browser = false,
+		instance_mode = "multi",
+		port = 0,
+		host = "0.0.0.0",
+		hooks = {
+			on_start = function(u)
+				url = u
+			end,
+		},
+	})
+	mp.start()
+	H.defer(mp.stop)
+	local other = vim.fs.joinpath(tmpdir, "other.md")
+	H.write_file(other, "# other\n")
+	vim.cmd("edit " .. vim.fn.fnameescape(other))
+	vim.bo.filetype = "markdown"
+	H.defer(function()
+		vim.cmd("edit " .. vim.fn.fnameescape(mdfile))
+	end)
+	mp.setup({ host = "127.0.0.1" })
+	url = nil
+	mp.start()
+	url = url or ""
+	local got = url ~= "" and http_get(url) or { status = 0 }
+	ok(
+		url:find("?t=", 1, true) ~= nil and got.status == 200,
+		('a retarget after setup({ host = "127.0.0.1" }) keeps ?t= and answers 200: %s, %d'):format(url, got.status)
+	)
+end)
 -- The tokenless URL still opens a page whose stream authenticates, with the
 -- token the served index hands the page.
 local opened
