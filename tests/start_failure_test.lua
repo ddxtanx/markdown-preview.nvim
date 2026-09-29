@@ -1,11 +1,12 @@
 -- tests/start_failure_test.lua
 -- A start that fails leaves nothing behind: no autocmd refreshing a
--- preview that does not exist, no token or workspace kept, no lock, no
--- on_start; the notification names the port and what to do. Section 1
--- stubs live-server's start to raise and Section 1b the lock's write, so
--- they hold on every live-server the plugin runs on, the pinned floor
--- included. A retarget, a reload and a scroll push that live-server
--- refuses are each told through the plugin's own notice.
+-- preview that does not exist, no token, workspace pointer or takeover
+-- role kept, no on_start; the notification names the port, and the next
+-- start begins clean. Section 1 stubs live-server's start to raise and
+-- Section 1b the lock's write, so they hold on every live-server the
+-- plugin runs on, the pinned floor included. A retarget live-server
+-- refuses leaves the served bytes as they were, and a retarget, a reload
+-- and a scroll push it refuses are each told through the plugin's notice.
 --
 -- Run: nvim --headless -u NONE -l tests/start_failure_test.lua
 
@@ -97,7 +98,10 @@ local function stub(name, fn)
 end
 
 H.section("Section 1: a start that raises leaves no state behind")
-start_raising("cannot listen on 127.0.0.1:18421: EADDRINUSE: address already in use")
+local failed_notes = start_raising("cannot listen on 127.0.0.1:18421: EADDRINUSE: address already in use")
+eq(#failed_notes, 1, "one notice for the failed start")
+eq(failed_notes[1] and failed_notes[1].level, vim.log.levels.ERROR, "the notice is an error")
+ok(failed_notes[1] and failed_notes[1].msg:find("(port 18421)", 1, true), "the notice names the port")
 eq(armed(), 0, "no autocmd is armed")
 eq(mp._token, nil, "the token is cleared")
 eq(mp._workspace_dir, nil, "the workspace is cleared")
@@ -127,6 +131,74 @@ eq(mp._workspace_dir, nil, "the workspace is cleared")
 eq(mp._server_instance, nil, "no server instance is kept")
 eq(calls.start, 0, "on_start is not called")
 mp.setup({ instance_mode = "multi", port = 18421 })
+
+-- A port no listener holds, for a start that must succeed.
+local function free_port()
+	local tcp = vim.uv.new_tcp()
+	tcp:bind("127.0.0.1", 0)
+	local port = tcp:getsockname().port
+	tcp:close()
+	return port
+end
+
+H.case("Section 1c: the start after a failed one arms, serves and opens the browser", function()
+	local util = require("markdown_preview.util")
+	local opened, real_open = 0, util.open_in_browser
+	util.open_in_browser = function()
+		opened = opened + 1
+	end
+	H.defer(function()
+		util.open_in_browser = real_open
+	end)
+	mp.setup({ open_browser = true, port = free_port() })
+	H.defer(function()
+		mp.setup({ open_browser = false, port = 18421 })
+	end)
+	mp.start()
+	H.defer(mp.stop)
+	ok(armed() > 0, "the start arms its autocmds")
+	eq(calls.start, 1, "on_start is called once")
+	ok(
+		H.wait_for(function()
+			return opened == 1
+		end, 2000),
+		"the browser is opened once"
+	)
+	local port = mp._server_instance and mp._server_instance.port
+	local r = H.http_get(("http://127.0.0.1:%d/content.md?t=%s"):format(port or 0, mp._token or ""))
+	eq(r.status, 200, "the content is served with the new token")
+end)
+calls.start, calls.stop = 0, 0
+
+H.case("Section 1d: a failed start drops a takeover secondary's role", function()
+	local lock = require("markdown_preview.lock")
+	local real_read, real_alive = lock.read, lock.is_server_alive
+	H.defer(function()
+		lock.read, lock.is_server_alive = real_read, real_alive
+	end)
+	lock.read = function()
+		return { port = 18422, token = "peer" }
+	end
+	lock.is_server_alive = function()
+		return true
+	end
+	mp.setup({ instance_mode = "takeover", port = free_port() })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", port = 18421 })
+	end)
+	mp.start()
+	ok(armed() > 0 and mp._takeover_port == 18422, "the start joins as a secondary")
+	-- The primary is gone: no lock, and this start's own server fails.
+	lock.read = function()
+		return nil
+	end
+	start_raising("cannot listen: EADDRINUSE: address already in use")
+	eq(armed(), 0, "no autocmd is left from the secondary")
+	eq(mp._takeover_port, nil, "the secondary's port is dropped")
+	eq(mp._is_primary, nil, "no role is kept")
+	eq(mp._token, nil, "the peer's token is dropped")
+end)
+calls.start, calls.stop = 0, 0
 
 H.section("Section 2: a start that succeeds arms the autocmds, a retarget keeps them")
 mp.setup({ port = 0 })
@@ -180,7 +252,11 @@ H.case("Section 3b: a retarget that cannot watch says live reload is off", funct
 	end)
 	mp.start()
 	eq(#notes, 1, "one notice for a retarget that could not watch")
-	ok(notes[1] and notes[1].msg:find("live reload is off", 1, true), "the notice says live reload is off")
+	eq(
+		notes[1] and notes[1].msg,
+		"Markdown Preview: the server reports live reload off; edits may not refresh the preview",
+		"the notice says live reload is off and names no cause"
+	)
 	eq(notes[1] and notes[1].level, vim.log.levels.WARN, "the notice is a warning")
 	eq(mp._workspace_dir, second_ws, "the workspace is the retargeted buffer's")
 	ok(armed_on(second_buf) > 0, "the retargeted buffer is armed")
@@ -203,6 +279,40 @@ H.case("Section 3c: a retarget whose reload live-server refuses says so", functi
 		"the notice carries the raise's message"
 	)
 	ok(armed_on(second_buf) > 0, "the retarget still arms the buffer")
+end)
+
+H.case("Section 3d: a takeover retarget live-server refuses leaves the served bytes", function()
+	local other_dir = vim.fs.joinpath(tmpdir, "other")
+	vim.fn.mkdir(other_dir, "p")
+	local third = vim.fs.joinpath(other_dir, "third.md")
+	H.write_file(third, "# third\n")
+	mp.setup({ instance_mode = "takeover", port = free_port() })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", port = 18421 })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	mp.start()
+	H.defer(mp.stop)
+	local ws = mp._workspace_dir
+	local content_file = vim.fs.joinpath(ws, "content.md")
+	local root_file = vim.fs.joinpath(ws, "asset_root")
+	local before = vim.fn.readblob(content_file)
+	local first_dir = vim.fs.dirname(vim.api.nvim_buf_get_name(first_buf))
+	eq(vim.fn.readblob(root_file), first_dir, "the sidecar names the first buffer's directory")
+	vim.cmd("edit " .. vim.fn.fnameescape(third))
+	vim.bo.filetype = "markdown"
+	local third_buf = vim.api.nvim_get_current_buf()
+	local notes = capture_notes()
+	stub("update_target", function()
+		error("update_target: root is gone", 2)
+	end)
+	mp.start()
+	eq(#notes, 1, "one notice for the refused retarget")
+	eq(notes[1] and notes[1].level, vim.log.levels.ERROR, "the notice is an error")
+	eq(vim.fn.readblob(content_file), before, "the served content is the first buffer's")
+	eq(vim.fn.readblob(root_file), first_dir, "the sidecar still names the first buffer's directory")
+	ok(armed_on(first_buf) > 0, "the first buffer keeps its autocmds")
+	eq(armed_on(third_buf), 0, "the refused buffer is not armed")
 end)
 
 H.case("Section 4: a reload and a scroll push live-server refuses are told once each", function()

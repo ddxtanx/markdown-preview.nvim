@@ -107,7 +107,6 @@ end
 
 -- Internal state
 M._augroup = nil
-M._active_bufnr = nil
 M._last_text_by_buf = {}
 M._server_instance = nil
 M._debounce_seq = 0
@@ -582,11 +581,24 @@ local function browser_url(port)
 	return base
 end
 
+-- What a stop and a failed start both drop: the autocmds, the token, the
+-- workspace pointer and a takeover role, a secondary's included.
+local function forget_session()
+	if M._augroup then
+		pcall(vim.api.nvim_del_augroup_by_id, M._augroup)
+		M._augroup = nil
+	end
+	M._workspace_dir = nil
+	M._last_scroll_line = nil
+	M._is_primary = nil
+	M._takeover_port = nil
+	M._token = nil
+end
+
 function M.start()
 	local bufnr = vim.api.nvim_get_current_buf()
 	-- What a retarget live-server refuses goes back to.
 	local served_dir = M._workspace_dir
-	M._active_bufnr = bufnr
 
 	-- Takeover coordination (lock probe + cross-instance events) talks to
 	-- 127.0.0.1, which a specific-interface bind does not answer on. Only
@@ -646,9 +658,16 @@ function M.start()
 		M._token = ls_util.random_token(16)
 	end
 
-	write_index_if_needed(dir)
-	write_content(dir, text, bufnr)
-	M._last_text_by_buf[bufnr] = text
+	-- A running server keeps serving the last buffer until it accepts the
+	-- new root, so a retarget writes nothing before that answer.
+	local function publish()
+		write_index_if_needed(dir)
+		write_content(dir, text, bufnr)
+		M._last_text_by_buf[bufnr] = text
+	end
+	if not M._server_instance then
+		publish()
+	end
 
 	-- Patterns matching workspace-served files that require ?t=<token>.
 	-- vim.pesc escapes every Lua-pattern magic char, so custom content_name /
@@ -716,10 +735,7 @@ function M.start()
 			end,
 		})
 		if not ok then
-			-- Nothing is kept from a start that failed: the token and the
-			-- workspace go with it, and no autocmd was armed.
-			M._token = nil
-			M._workspace_dir = nil
+			forget_session()
 			vim.notify(
 				("Markdown Preview: failed to start server (port %s): %s"):format(tostring(port), tostring(inst)),
 				vim.log.levels.ERROR
@@ -736,8 +752,7 @@ function M.start()
 			if not locked then
 				pcall(ls_server.stop, inst)
 				lock.remove()
-				M._token = nil
-				M._workspace_dir = nil
+				forget_session()
 				vim.notify(
 					("Markdown Preview: failed to start server (port %s): %s"):format(
 						tostring(inst.port),
@@ -775,12 +790,14 @@ function M.start()
 			vim.notify("Markdown Preview: could not retarget: " .. tostring(watching), vim.log.levels.ERROR)
 			return
 		end
+		-- live-server's own warning names the cause, where there is one.
 		if watching == false then
 			vim.notify(
-				"Markdown Preview: the preview follows this buffer, but live reload is off: live-server could not watch its workspace",
+				"Markdown Preview: the server reports live reload off; edits may not refresh the preview",
 				vim.log.levels.WARN
 			)
 		end
+		publish()
 		set_autocmds_for_buffer(bufnr)
 		report_push("reload the preview", pcall(ls_server.reload, M._server_instance, M.config.content_name))
 
@@ -806,10 +823,6 @@ function M.refresh()
 end
 
 function M.stop()
-	if M._augroup then
-		pcall(vim.api.nvim_del_augroup_by_id, M._augroup)
-		M._augroup = nil
-	end
 	if M._server_instance then
 		pcall(ls_server.stop, M._server_instance)
 		M._server_instance = nil
@@ -817,11 +830,7 @@ function M.stop()
 	if M._is_primary then
 		require("markdown_preview.lock").remove()
 	end
-	M._workspace_dir = nil
-	M._last_scroll_line = nil
-	M._is_primary = nil
-	M._takeover_port = nil
-	M._token = nil
+	forget_session()
 
 	if type(M.config.hooks.on_stop) == "function" then
 		M.config.hooks.on_stop()
