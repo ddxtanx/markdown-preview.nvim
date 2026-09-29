@@ -705,13 +705,19 @@ function M.start()
 	end
 
 	-- Resolve workspace: shared (takeover) or per-buffer (multi)
-	local dir
-	if M.config.instance_mode == "takeover" then
-		dir = util.shared_workspace()
-	else
-		dir = ensure_workspace(bufnr)
+	local dir = M.config.instance_mode == "takeover" and util.shared_workspace() or resolve_workspace(bufnr)
+	local made, mkdir_err = pcall(util.mkdirp, dir)
+	if not made then
+		-- A running server keeps its preview; anything else starts from nothing.
+		if not M._server_instance then
+			forget_session()
+		end
+		vim.notify(
+			("Markdown Preview: could not create the workspace %s: %s"):format(dir, tostring(mkdir_err)),
+			vim.log.levels.ERROR
+		)
+		return
 	end
-	util.mkdirp(dir)
 	M._workspace_dir = dir
 
 	-- Decide role + token BEFORE writing index.html. The index bakes the

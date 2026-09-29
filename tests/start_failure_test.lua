@@ -1255,4 +1255,24 @@ H.case("Section 13: a retarget reads no host a setup() set after the start", fun
 end)
 calls.start, calls.stop = 0, 0
 
+H.case("Section 14: a workspace that cannot be created fails the start with one notice", function()
+	local blocker = vim.fs.joinpath(tmpdir, "blocker")
+	H.write_file(blocker, "a file where the workspace's parent should be\n")
+	mp.setup({ workspace_dir = vim.fs.joinpath(blocker, "ws"), port = free_port() })
+	H.defer(function()
+		mp.config.workspace_dir = nil
+		mp.setup({ port = 18421 })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	local notes = capture_notes()
+	local ran, err = pcall(mp.start)
+	ok(ran, "start() returns instead of raising: " .. tostring(err))
+	one_clean_error(notes, "Markdown Preview: could not create the workspace ")
+	eq(mp._server_instance, nil, "no server instance is kept")
+	eq(mp._workspace_dir, nil, "no workspace pointer is kept")
+	eq(mp._token, nil, "no token is kept")
+	eq(armed(), 0, "no autocmd is armed")
+end)
+calls.start, calls.stop = 0, 0
+
 H.finish()
