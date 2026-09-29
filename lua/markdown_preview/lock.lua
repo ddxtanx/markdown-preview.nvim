@@ -30,7 +30,7 @@ function M.read()
 	return tbl
 end
 
-function M.write(port, workspace, token)
+function M.write(port, workspace, token, host)
 	local path = lock_path()
 	local dir = path:match("^(.+)/[^/]+$")
 	if dir and vim.fn.isdirectory(dir) == 0 then
@@ -41,6 +41,7 @@ function M.write(port, workspace, token)
 		workspace = workspace,
 		pid = vim.fn.getpid(),
 		token = token, -- nil OK; secondary instances need this to hit /__live/inject
+		host = host, -- the bind, which decides whether a secondary's URL carries the token
 	})
 	-- Mode 0600 (decimal 384) so the token isn't world-readable on multi-user
 	-- systems. The open applies the mode only when it creates the file (a

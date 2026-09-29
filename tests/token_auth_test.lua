@@ -366,4 +366,70 @@ ok(
 	)
 )
 
+-- A takeover secondary serves nothing: its URL's token follows the bind of
+-- the primary that serves the page, whatever the secondary's own host.
+local function secondary_url(primary_host, drop_host)
+	local sport = free_port()
+	mp.setup({ open_browser = false, instance_mode = "takeover", port = sport, host = primary_host, hooks = {} })
+	mp.start()
+	if drop_host then
+		-- The lock an older primary wrote: the same fields, no host.
+		local older = read_lock() or {}
+		older.host = nil
+		H.write_file(lock_file, vim.json.encode(older))
+	end
+	local script = vim.fs.joinpath(H.tmpdir(), "secondary.lua")
+	H.write_file(
+		script,
+		([[
+vim.opt.runtimepath:prepend(%q)
+vim.opt.runtimepath:prepend(%q)
+local mp = require("markdown_preview")
+local url = ""
+mp.setup({ open_browser = false, port = %d, host = "127.0.0.1", hooks = { on_start = function(u) url = u end } })
+vim.cmd("edit " .. vim.fn.fnameescape(%q))
+vim.bo.filetype = "markdown"
+mp.start()
+io.stdout:write(vim.json.encode({ primary = mp._is_primary, url = url }) .. "\n")
+mp.stop()
+vim.cmd("qa!")
+]]):format(ls_dir, H.root, sport, mdfile)
+	)
+	local run = vim.system({ vim.v.progpath, "--headless", "-u", "NONE", "-l", script }, { timeout = 30000 }):wait()
+	local line = (run.stdout or ""):match("({.-})%s*$")
+	local got = line and select(2, pcall(vim.json.decode, line)) or nil
+	local surl = (type(got) == "table" and got.primary == false and got.url) or ""
+	local status = surl ~= "" and http_get(surl).status or 0
+	mp.stop()
+	return surl, status, (run.stdout or "") .. (run.stderr or "")
+end
+local wide_url, wide_status, wide_out = secondary_url("0.0.0.0")
+ok(
+	wide_url:match("^http://127%.0%.0%.1:%d+/%?t=%x+$") ~= nil and wide_status == 200,
+	("a 127.0.0.1 secondary of a 0.0.0.0 primary gets a ?t= URL that answers 200: %s, %d %s"):format(
+		wide_url,
+		wide_status,
+		wide_url == "" and wide_out or ""
+	)
+)
+local loop_sec_url, loop_sec_status, loop_sec_out = secondary_url("127.0.0.1")
+ok(
+	loop_sec_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil and loop_sec_status == 200,
+	("a secondary of a 127.0.0.1 primary gets the tokenless URL that answers 200: %s, %d %s"):format(
+		loop_sec_url,
+		loop_sec_status,
+		loop_sec_url == "" and loop_sec_out or ""
+	)
+)
+-- A primary that predates the host field still runs; its URL must work.
+local old_url, old_status, old_out = secondary_url("127.0.0.1", true)
+ok(
+	old_url:match("^http://127%.0%.0%.1:%d+/%?t=%x+$") ~= nil and old_status == 200,
+	("a lock without the host field gives a ?t= URL that answers 200: %s, %d %s"):format(
+		old_url,
+		old_status,
+		old_url == "" and old_out or ""
+	)
+)
+
 H.finish()

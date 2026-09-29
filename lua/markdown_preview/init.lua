@@ -127,8 +127,12 @@ local function effective_port()
 	return 0
 end
 
+local function is_loopback(host)
+	return host == "127.0.0.1" or host == "localhost"
+end
+
 local function host_is_loopback()
-	return M.config.host == "127.0.0.1" or M.config.host == "localhost"
+	return is_loopback(M.config.host)
 end
 
 ---------------------------------------------------------------------------
@@ -569,10 +573,11 @@ local function lan_ip()
 	return (addr and addr.ip) or "127.0.0.1"
 end
 
--- Build the URL the browser opens to. On a network bind it embeds the auth
--- token so the first request includes it (the page then stashes it in
--- sessionStorage for refreshes).
-local function browser_url(port)
+-- Build the URL the browser opens to. On any other bind than 127.0.0.1 or
+-- localhost it embeds the auth token so the first request includes it (the
+-- page then stashes it in sessionStorage for refreshes). bind_host is the
+-- host of the server that serves the page, nil when that is unknown.
+local function browser_url(port, bind_host)
 	-- 0.0.0.0 shows the LAN address a remote browser reaches, which no probe checks.
 	local display_host = (M.config.host == "0.0.0.0") and lan_ip() or M.config.host
 	-- The IPv6 wildcard shows its loopback, as live-server's own URL does.
@@ -586,8 +591,8 @@ local function browser_url(port)
 	local base = ("http://%s:%d/"):format(display_host, port)
 	-- On a loopback bind the index carries the token (data-live-token), so
 	-- the URL leaves it out of history, the address bar and a shared
-	-- screen; a network bind's page has no other way to get it.
-	if M._token and M._token ~= "" and not host_is_loopback() then
+	-- screen; any other bind's page has no other way to get it.
+	if M._token and M._token ~= "" and not is_loopback(bind_host) then
 		return base .. "?t=" .. M._token
 	end
 	return base
@@ -648,7 +653,9 @@ function M.start()
 		local lock_data = lock.read()
 		if lock_data and lock.is_server_alive(lock_data.port) then
 			-- Secondary: server is already running in another Neovim
-			-- instance. Adopt its token so our scroll-sync RPC works.
+			-- instance. Adopt its token so our scroll-sync RPC works. The
+			-- primary's bind decides whether its index carries the token; a
+			-- lock from an older primary has no host, so the URL keeps it.
 			M._is_primary = false
 			M._takeover_port = lock_data.port
 			M._token = lock_data.token
@@ -656,7 +663,7 @@ function M.start()
 			M._last_text_by_buf[bufnr] = text
 			set_autocmds_for_buffer(bufnr)
 			if type(M.config.hooks.on_start) == "function" then
-				M.config.hooks.on_start(browser_url(lock_data.port))
+				M.config.hooks.on_start(browser_url(lock_data.port, lock_data.host))
 			end
 			return
 		end
@@ -766,7 +773,7 @@ function M.start()
 		-- its lock left a listening server, a raw Lua error and no browser.
 		if M.config.instance_mode == "takeover" then
 			local lock = require("markdown_preview.lock")
-			local locked, lock_err = pcall(lock.write, inst.port, dir, M._token)
+			local locked, lock_err = pcall(lock.write, inst.port, dir, M._token, M.config.host)
 			if not locked then
 				pcall(ls_server.stop, inst)
 				lock.remove()
@@ -789,12 +796,12 @@ function M.start()
 		set_autocmds_for_buffer(bufnr)
 
 		if type(M.config.hooks.on_start) == "function" then
-			M.config.hooks.on_start(browser_url(inst.port))
+			M.config.hooks.on_start(browser_url(inst.port, M.config.host))
 		end
 
 		if M.config.open_browser then
 			vim.defer_fn(function()
-				util.open_in_browser(browser_url(inst.port), M.config.browser)
+				util.open_in_browser(browser_url(inst.port, M.config.host), M.config.browser)
 			end, 200)
 		end
 	else
@@ -820,13 +827,13 @@ function M.start()
 		report_push("reload the preview", pcall(ls_server.reload, M._server_instance, M.config.content_name))
 
 		if type(M.config.hooks.on_start) == "function" then
-			M.config.hooks.on_start(browser_url(M._server_instance.port))
+			M.config.hooks.on_start(browser_url(M._server_instance.port, M.config.host))
 		end
 
 		-- No browser tab connected (user closed it)? Re-open.
 		if M.config.open_browser and ls_server.connected_client_count(M._server_instance) == 0 then
 			vim.defer_fn(function()
-				util.open_in_browser(browser_url(M._server_instance.port), M.config.browser)
+				util.open_in_browser(browser_url(M._server_instance.port, M.config.host), M.config.browser)
 			end, 200)
 		end
 	end
