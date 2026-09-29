@@ -1186,4 +1186,25 @@ H.case("Section 12b: a refresh after a failed takeover retarget writes the serve
 end)
 calls.start, calls.stop = 0, 0
 
+H.case("Section 13: a retarget reads no host a setup() set after the start", function()
+	mp.setup({ instance_mode = "takeover", host = "0.0.0.0", port = free_port() })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", host = "127.0.0.1", port = 18421 })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	mp.start()
+	H.defer(mp.stop)
+	local inst = mp._server_instance
+	mp.setup({ host = "::1" })
+	vim.cmd("buffer " .. second_buf)
+	local notes = capture_notes()
+	mp.start()
+	eq(#notes, 0, "no notice: the running server takes the retarget")
+	eq(mp._server_instance, inst, "the same server runs")
+	ok(armed_on(second_buf) > 0, "the retargeted buffer is armed")
+	local r = H.http_get(("http://127.0.0.1:%d/content.md?t=%s"):format(inst and inst.port or 0, mp._token or ""))
+	ok(r.body:find("# second", 1, true) ~= nil, "the server serves the retargeted buffer: " .. r.body)
+end)
+calls.start, calls.stop = 0, 0
+
 H.finish()

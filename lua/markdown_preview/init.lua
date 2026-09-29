@@ -680,11 +680,14 @@ function M.start()
 	-- What a retarget live-server refuses goes back to.
 	local served_dir = M._workspace_dir
 
-	-- Takeover coordination (lock probe + cross-instance events) talks to
-	-- 127.0.0.1, which a specific-interface bind does not answer on. Only
-	-- loopback and the wildcard are supported there; multi mode has no such
-	-- coupling and accepts any bind address.
-	if M.config.instance_mode == "takeover" and not is_loopback(M.config.host) and M.config.host ~= "0.0.0.0" then
+	-- Takeover talks to 127.0.0.1, which a specific-interface bind does not
+	-- answer on; the host is start input, so a running server's retarget skips it.
+	if
+		not M._server_instance
+		and M.config.instance_mode == "takeover"
+		and not is_loopback(M.config.host)
+		and M.config.host ~= "0.0.0.0"
+	then
 		vim.notify(
 			'Markdown Preview: takeover mode supports host = "127.0.0.1", "localhost" or "0.0.0.0" only.\n'
 				.. 'Use "0.0.0.0" for LAN access, or instance_mode = "multi" to bind a specific interface.',
@@ -767,23 +770,6 @@ function M.start()
 		M._last_text_by_buf[bufnr] = text
 	end
 
-	-- Patterns matching workspace-served files that require ?t=<token>.
-	-- vim.pesc escapes every Lua-pattern magic char, so custom content_name /
-	-- index_name values containing '-', '+', '.', etc. still gate correctly.
-	local content_path_pattern = "^/" .. vim.pesc(M.config.content_name) .. "$"
-
-	-- The asset_root sidecar is gated too: it holds the source file's
-	-- directory path, which is nobody's business but ours.
-	local protected = { content_path_pattern, "^/asset_root$" }
-	if not is_loopback(M.config.host) then
-		-- On a network bind the index page must be gated too: it is the
-		-- browser's bootstrap document, and serving it openly would hand the
-		-- preview to any peer that can reach the port. The tokenized ?t= URL
-		-- (printed by hooks.on_start / opened by the browser) unlocks it.
-		table.insert(protected, "^/$")
-		table.insert(protected, "^/" .. vim.pesc(M.config.index_name) .. "$")
-	end
-
 	-- Relative image support needs the asset route in live-server. The two
 	-- plugins are versioned independently, so warn (once) if the installed
 	-- live-server predates it: images will 404 until it's updated.
@@ -801,6 +787,13 @@ function M.start()
 		local port = effective_port()
 		local index_path = vim.fs.joinpath(dir, M.config.index_name)
 		local asked_host = M.config.host
+		-- vim.pesc keeps a content_name or index_name with pattern characters exact.
+		local protected = { "^/" .. vim.pesc(M.config.content_name) .. "$", "^/asset_root$" }
+		if not is_loopback(asked_host) then
+			-- Any other bind's index is gated too; the ?t= URL unlocks it.
+			table.insert(protected, "^/$")
+			table.insert(protected, "^/" .. vim.pesc(M.config.index_name) .. "$")
+		end
 		local ok, inst = pcall(ls_server.start, {
 			port = port,
 			host = asked_host,
