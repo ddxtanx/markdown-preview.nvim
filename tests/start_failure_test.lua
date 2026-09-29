@@ -1651,4 +1651,24 @@ H.case("Section 15b: a wildcard rule that raises is told once per server", funct
 end)
 calls.start, calls.stop = 0, 0
 
+H.case("Section 11d: a join whose arming raises leaves the primary's content", function()
+	primary_answers_on(free_port())
+	mp.setup({ instance_mode = "takeover", port = free_port(), auto_refresh_events = { "NoSuchEvent" } })
+	H.defer(function()
+		mp.setup({
+			instance_mode = "multi",
+			port = 18421,
+			auto_refresh_events = { "InsertLeave", "TextChanged", "TextChangedI", "BufWritePost" },
+		})
+	end)
+	local content = vim.fs.joinpath(require("markdown_preview.util").shared_workspace(), "content.md")
+	vim.fn.mkdir(vim.fs.dirname(content), "p")
+	H.write_file(content, "# the primary's text")
+	vim.cmd("buffer " .. first_buf)
+	capture_notes()
+	mp.start()
+	eq(vim.fn.readblob(content), "# the primary's text", "the shared content file holds the primary's text")
+end)
+calls.start, calls.stop = 0, 0
+
 H.finish()
