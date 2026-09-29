@@ -8,7 +8,7 @@ Neovim plugin for live markdown preview in the browser. Pure Lua, no npm: the pl
 - `lua/markdown_preview/floor.lua`: the Neovim requirement and its message, the one source the plugin file and the module read
 - `lua/markdown_preview/util.lua`: fs helpers, workspace resolution, asset resolution, browser open
 - `lua/markdown_preview/ts.lua`: Tree-sitter mermaid extractor plus a Lua-pattern fallback
-- `lua/markdown_preview/lock.lua`: the takeover-mode lock file (port, workspace, pid, token; mode 0600)
+- `lua/markdown_preview/lock.lua`: the takeover-mode lock file (port, workspace, pid, token and the address the primary's server bound; mode 0600), removed only by the instance that wrote it
 - `lua/markdown_preview/remote.lua`: HTTP event injection for secondary instances (scroll sync)
 - `plugin/markdown-preview.lua`: the floor check and the user commands (`:MarkdownPreview`, `:MarkdownPreviewRefresh`, `:MarkdownPreviewStop`)
 - `assets/index.html`: the browser preview app (CSS plus JS, one file)
@@ -29,7 +29,7 @@ Neovim plugin for live markdown preview in the browser. Pure Lua, no npm: the pl
 
 - Neovim writes the buffer to `content.md` in a workspace directory under `stdpath("cache")/markdown-preview/` (takeover always; multi unless `workspace_dir` is set); live-server serves it and pushes SSE events (`reload` on change, `scroll` with the cursor line).
 - The browser renders with markdown-it, highlight.js, KaTeX and mermaid (loaded from CDNs) and diffs the DOM with morphdom.
-- Auth: a per-session token gates five surfaces, `content.md`, the `asset_root` sidecar, the SSE stream, the inject endpoint and the asset route; on the loopback default the index page is not gated and carries the token (`data-live-token`), and on a non-loopback `host` the index page is gated too and carries no token, which the browser takes from the `?t=` URL.
+- Auth: a per-session token gates five surfaces, `content.md`, the `asset_root` sidecar, the SSE stream, the inject endpoint and the asset route; on a server bound to `127.0.0.1` (the default, and what `localhost` binds) the index page is not gated and carries the token (`data-live-token`), and on any other bound address, `::1` included, the index page is gated too and carries no token, which the browser takes from the `?t=` URL; the address the server bound decides, never a `host` set after the start.
 - Instance modes: `takeover` (the default; one shared workspace, port 8421 under the default `port = 0`, a lock file elects the primary) and `multi` (a per-buffer workspace, or `workspace_dir` when set, and a server per instance on an OS-assigned port under the default `port = 0`).
 - `mermaid_renderer = "rust"` pre-renders mermaid fences through the `mmdr` CLI; the default renders them in the browser.
 
@@ -51,11 +51,13 @@ Neovim plugin for live markdown preview in the browser. Pure Lua, no npm: the pl
 - `helpers_test`: the harness itself (root and isolation, the bounded curl, exit rulings, callback errors, `H.expect_error`, `H.rtp`, path spelling, the teardown by `H.case` and `H.defer`, the raw TCP client, the response reader, the descriptor and handle counters).
 - `parse_test`: every tracked Lua file parses under this Neovim's LuaJIT (it needs a git checkout), and `lazy.lua` returns exactly one spec, `{ "selimacerbas/live-server.nvim" }`.
 - `rtp_test`: how `H.rtp()` proves the checkout and chooses live-server.nvim, and what it refuses.
-- `token_auth_test`: the token reaches the served page and gates `content.md`, and the lock file that holds it is private.
+- `token_auth_test`: the token reaches the served page and gates `content.md`, the lock file that holds it is private, and the preview URL names the address the server bound and carries the token on any bind but `127.0.0.1`.
+- `start_failure_test`: a start or a retarget that fails, refused or raising, is one notice and a clean state (the server stopped, no autocmd, token or lock of its own left) and leaves a running primary's files and lock alone; a refused push is told once, from a primary or a secondary, and a deferred browser open survives a stop.
 - `asset_route_test`: the installed live-server exports `asset_route`, the route serves files beside the document, and the sidecar is gated.
 - `floor_guard_test`: below 0.10 every documented command refuses with the floor message; at the floor the commands are defined.
 - `tests/floor_smoke.sh`: the refusal on a real Neovim below the floor; CI runs it on 0.9.5, and locally such a Neovim goes first on PATH.
-- curl is needed by the three suites that make HTTP requests (`helpers_test`, `token_auth_test`, `asset_route_test`).
+- curl is needed by the four suites that make HTTP requests (`helpers_test`, `token_auth_test`, `asset_route_test`, `start_failure_test`).
+- On the live-server floor the rows that need a newer live-server (a start on a held port that raises, its refusal texts, `localhost` bound as `127.0.0.1`) skip through `H.skip`, each naming what the floor lacks, when `features.start_raises` is absent; on live-server `main` none skips.
 - `tests/browser/smoke.test.ts` (`make test-browser`): a headless Neovim serves a buffer, Playwright's headless Chromium renders the page, and an edit over RPC reaches it through the plugin's autocmds and its SSE push, no explicit refresh. It needs bun 1.4.0 or newer (the lockfile's version), Playwright's Chromium (`cd tests/browser && bun install --frozen-lockfile && bun x playwright install --only-shell chromium`, the install first so `bun x` runs the pinned Playwright) and network for the page's CDN libraries (jsDelivr and unpkg); a red browser job after a third-party release, with no change here, is re-run once, and if it stays red the diagnosis names the URL; a red run prints Neovim's output and exit, the page's errors and console warnings, pending and failed requests, 4xx and 5xx responses and the page state.
 
 ## Test harness contract

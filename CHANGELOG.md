@@ -13,7 +13,7 @@ All notable changes to this project; versions follow SemVer. From `[Unreleased]`
 - The start-failure notification reads `Markdown Preview: failed to start server (port <port>): <reason>`.
 - `vim.uv` replaces the deprecated `vim.loop` throughout.
 - When the port is taken by another program, the start-failure notification says so and how to pick another: `Markdown Preview: port <port> is in use by another program. Set port to a free one in setup(), or port = 0 with instance_mode = "multi" for an OS-assigned port.` A port the OS assigns keeps the generic notification, whose reason names the port.
-- With `host = "127.0.0.1"` (the default) or `"localhost"`, the preview URL no longer carries the `?t=` token; any other host keeps it. The URL is what lands in browser history, its sync and the process list, so the token stays out of all three.
+- When the server binds `127.0.0.1` (the default `host`, and what `"localhost"` binds), the preview URL no longer carries the `?t=` token; a server bound to any other address keeps it. The address the server bound decides, not the `host` setting: `"localhost"` opens `http://127.0.0.1:<port>/`, since a browser tries `localhost`'s `::1` first, and a takeover secondary follows the address the primary's lock records. The URL is what lands in browser history, its sync and the process list, so the token stays out of all three.
 
 ### Removed
 
@@ -25,7 +25,7 @@ All notable changes to this project; versions follow SemVer. From `[Unreleased]`
 - A takeover-mode lock file that cannot be made private fails the start with the start-failure notification; before, the server stayed running with an empty lock and the start raised a Lua error.
 - A preview that fails to start (a taken port, an address live-server cannot bind, a lock file that cannot be made private) keeps no autocmds, no session token and no workspace pointer, and drops a takeover role it held as a secondary; before, six autocmds kept refreshing a preview that did not exist.
 - When live-server refuses to switch the preview to another buffer, the notice reads `Markdown Preview: could not retarget: <reason>` and the preview keeps showing the buffer it showed, its text and images included. When the server reports live reload off after a switch, a warning says so. A reload or scroll update live-server refuses is reported once per preview server. Before, all three went unreported.
-- An IPv6 `host` such as `"::1"`, with `instance_mode = "multi"`, gives a preview URL in brackets, `http://[::1]:<port>/`, which browsers open. The IPv6 wildcard `"::"` shows `http://[::1]:<port>/`, as live-server.nvim does.
+- An IPv6 `host` such as `"::1"`, with `instance_mode = "multi"`, gives a preview URL in brackets, `http://[::1]:<port>/?t=<token>`, which browsers open; the token stays, since only a `127.0.0.1` bind's page carries it. The IPv6 wildcard `"::"`, however it is spelled, shows `http://[::1]:<port>/?t=<token>`, as live-server.nvim does, and an IPv4-mapped address such as `"::ffff:127.0.0.1"` shows its IPv4 form.
 
 ### Security
 

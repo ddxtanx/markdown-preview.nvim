@@ -185,9 +185,9 @@ The notification will show the full URL including the auth token (e.g. `http://1
 
 > **Security notes for network binding**
 >
-> - With a non-loopback `host`, the tokenized URL is required for *everything* the plugin writes, including the page itself: requests without `?t=<token>` get 401. Peers on your network cannot read your buffer without the URL. A `workspace_dir` set in multi mode is served whole, so any other file you keep there is readable without it.
+> - With any `host` but `127.0.0.1` and `localhost` (which binds `127.0.0.1`), `::1` included, the tokenized URL is required for *everything* the plugin writes, including the page itself: requests without `?t=<token>` get 401. Peers on your network cannot read your buffer without the URL. A `workspace_dir` set in multi mode is served whole, so any other file you keep there is readable without it.
 > - Traffic is plain, unencrypted HTTP. Anyone who obtains the URL (or can sniff the local network) can read the previewed buffer while the preview runs.
-> - Takeover mode supports `host = "127.0.0.1"` or `"0.0.0.0"` only. To bind a specific interface, use `instance_mode = "multi"`.
+> - Takeover mode supports `host = "127.0.0.1"`, `"localhost"` (which binds `127.0.0.1`) or `"0.0.0.0"` only. To bind a specific interface, use `instance_mode = "multi"`.
 > - Zero-config alternative: keep the default loopback bind and tunnel instead — `ssh -L 8421:localhost:8421 <remote>` — then open the URL printed by `on_start` locally, replacing the host with `127.0.0.1`. Nothing is exposed to the network, and traffic is encrypted by SSH.
 
 ### Instance modes
@@ -270,11 +270,11 @@ Browser-side libraries are loaded from CDN (cached by your browser):
 
 ## Security
 
-- **Local by default.** The preview server binds to `127.0.0.1`. A per-session 128-bit token gates five surfaces: your buffer content (`content.md`), the `asset_root` sidecar, the SSE stream, the event-injection endpoint and the asset route; with a non-loopback `host`, the preview page itself requires it too (see *Remote access* above). [SECURITY.md](SECURITY.md) says what the token keeps out on each bind.
+- **Local by default.** The preview server binds to `127.0.0.1`. A per-session 128-bit token gates five surfaces: your buffer content (`content.md`), the `asset_root` sidecar, the SSE stream, the event-injection endpoint and the asset route; with any `host` but `127.0.0.1` and `localhost`, the preview page itself requires it too (see *Remote access* above). [SECURITY.md](SECURITY.md) says what the token keeps out on each bind.
 - **Raw HTML is rendered by default** (GitHub-like). HTML embedded in markdown runs inside the preview page. With `allow_raw_html = false` the preview is meant to render embedded HTML as text, and that switch is being hardened, so a file you do not trust is previewed at your own risk today.
 - **Browser libraries load from CDNs** (jsdelivr/unpkg, see *Dependencies*). Rendering requires internet access, and a compromised script served from a CDN would run in the page that holds the token (see [SECURITY.md](SECURITY.md)). Vendoring the assets locally is planned ([#27](https://github.com/selimacerbas/markdown-preview.nvim/issues/27)).
 - **`custom_css` files are inlined into the preview page** verbatim. Point it only at files you trust.
-- **Relative images are served from the previewed file's directory.** The token-gated asset route can serve *any* file at or below that directory (not just images). A previewed file's raw HTML runs in a page that holds the token, so on any bind it can read every file under the source file's directory through the asset route (`.env`, `secrets.txt`, …); on a non-loopback `host` anyone holding the tokenized URL can too. Keep sensitive files out of the directory tree you preview from, and prefer an SSH tunnel to a network bind.
+- **Relative images are served from the previewed file's directory.** The token-gated asset route can serve *any* file at or below that directory (not just images). A previewed file's raw HTML runs in a page that holds the token, so on any bind it can read every file under the source file's directory through the asset route (`.env`, `secrets.txt`, …); on any `host` but `127.0.0.1` and `localhost` anyone holding the tokenized URL can too. Keep sensitive files out of the directory tree you preview from, and prefer an SSH tunnel to a network bind.
 - The takeover-mode lock file (which contains the session token) is written with mode `0600`.
 
 ---

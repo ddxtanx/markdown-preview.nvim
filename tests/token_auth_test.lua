@@ -1,8 +1,10 @@
 -- tests/token_auth_test.lua
 -- End-to-end check that the plugin generates a token, threads it into the
--- served HTML and gates content.md, and that the lockfile holding it is
--- private. The suite drives require("markdown_preview").start() directly, not
--- the :MarkdownPreview user command.
+-- served HTML and gates content.md, that the lockfile holding it is
+-- private, and (Section 6) that the preview URL names the address the
+-- server bound and carries the token on any bind but 127.0.0.1. The suite
+-- drives require("markdown_preview").start() directly, not the
+-- :MarkdownPreview user command.
 --
 -- Run: nvim --headless -u NONE -l "$PWD/tests/token_auth_test.lua"
 -- live-server.nvim is found by tests/helpers.lua ($LIVE_SERVER_RTP,
@@ -255,6 +257,9 @@ ok(uv.fs_stat(lock_file) == nil, "no lock is left")
 mp.stop()
 
 H.section("Section 6: the preview URL")
+-- Every row reads the URL on_start receives: its host is the address the
+-- server bound as a browser reaches it, and the token rides along on any
+-- bind but 127.0.0.1, whose index carries it.
 -- The live-server that binds localhost as 127.0.0.1 and reports the
 -- address canonical; start_raises arrived with them.
 local ls_features = require("live_server.server").features

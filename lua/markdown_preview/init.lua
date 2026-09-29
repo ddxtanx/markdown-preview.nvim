@@ -686,7 +686,7 @@ function M.start()
 	-- coupling and accepts any bind address.
 	if M.config.instance_mode == "takeover" and not is_loopback(M.config.host) and M.config.host ~= "0.0.0.0" then
 		vim.notify(
-			'Markdown Preview: takeover mode supports host = "127.0.0.1" or "0.0.0.0" only.\n'
+			'Markdown Preview: takeover mode supports host = "127.0.0.1", "localhost" or "0.0.0.0" only.\n'
 				.. 'Use "0.0.0.0" for LAN access, or instance_mode = "multi" to bind a specific interface.',
 			vim.log.levels.ERROR
 		)

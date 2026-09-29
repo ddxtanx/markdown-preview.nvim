@@ -7,6 +7,11 @@
 -- plugin runs on, the pinned floor included. A retarget live-server
 -- refuses leaves the served bytes as they were, and a retarget, a reload
 -- and a scroll push it refuses are each told through the plugin's notice.
+-- Sections 6 to 9: a refused start leaves a running primary's files and
+-- lock alone, a raise after the server started stops it with one notice,
+-- a secondary's refused push is told once, and a deferred browser open
+-- survives a stop. Rows that need live-server's start raise skip without
+-- it; takeover's host rule closes the file.
 --
 -- Run: nvim --headless -u NONE -l tests/start_failure_test.lua
 
@@ -1008,6 +1013,24 @@ H.case("Section 9: a stop before the deferred browser open leaves nothing to ope
 	local raised = vim.list_slice(H.errors(), errors_before + 1)
 	eq(#raised, 0, "no error when the opens fire: " .. table.concat(raised, " | "))
 	eq(opened, 0, "no browser is opened for a stopped server")
+end)
+calls.start, calls.stop = 0, 0
+
+H.case("Section 10: takeover refuses a host other than 127.0.0.1, localhost and 0.0.0.0", function()
+	mp.setup({ instance_mode = "takeover", host = "::1", port = free_port() })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", host = "127.0.0.1", port = 18421 })
+	end)
+	local notes = capture_notes()
+	mp.start()
+	eq(#notes, 1, "one notice for the refused host")
+	eq(
+		notes[1] and notes[1].msg,
+		'Markdown Preview: takeover mode supports host = "127.0.0.1", "localhost" or "0.0.0.0" only.\n'
+			.. 'Use "0.0.0.0" for LAN access, or instance_mode = "multi" to bind a specific interface.',
+		"the notice names the three hosts takeover accepts"
+	)
+	eq(mp._server_instance, nil, "no server instance is kept")
 end)
 calls.start, calls.stop = 0, 0
 

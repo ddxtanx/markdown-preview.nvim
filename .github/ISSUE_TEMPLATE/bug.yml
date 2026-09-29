@@ -42,5 +42,5 @@ body:
     id: health
     attributes:
       label: Diagnostics
-      description: The output of `:messages` after the failure, and `:checkhealth markdown_preview` once your version has it. A failed browser launch prints the preview URL with its token, so replace the `?t=<token>` query with `?t=<redacted>`.
+      description: The output of `:messages` after the failure, and `:checkhealth markdown_preview` once your version has it. A failed browser launch prints the preview URL, which carries the token on any bind but `127.0.0.1` (the default, and what `localhost` binds), so replace a `?t=<token>` query with `?t=<redacted>`.
       render: text
