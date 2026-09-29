@@ -13,7 +13,7 @@ All notable changes to this project; versions follow SemVer. From `[Unreleased]`
 - The start-failure notification reads `Markdown Preview: failed to start server (port <port>): <reason>`.
 - `vim.uv` replaces the deprecated `vim.loop` throughout.
 - When the port is taken by another program, the start-failure notification says so and how to pick another: `Markdown Preview: port <port> is in use by another program. Set port to a free one in setup(), or port = 0 with instance_mode = "multi" for an OS-assigned port.` A port the OS assigns keeps the generic notification, whose reason names the port.
-- On a loopback bind the preview URL no longer carries the `?t=` token; the page reads the token from the index, so it stays out of browser history. A network bind keeps it.
+- With `host = "127.0.0.1"` (the default) or `"localhost"`, the preview URL no longer carries the `?t=` token; any other host keeps it. The URL is what lands in browser history, its sync and the process list, so the token stays out of all three.
 
 ### Removed
 
