@@ -278,14 +278,36 @@ local probe = uv.new_tcp()
 local v6 = probe:bind("::1", 0)
 probe:close()
 if v6 then
+	-- The token follows the bracket: a ::1 index is gated, so a URL without it answers 401.
 	local v6_url = url_for("::1")
-	ok(v6_url:match("^http://%[::1%]:%d+/") ~= nil, "an IPv6 loopback bind yields http://[::1]:<port>/: " .. v6_url)
+	ok(
+		v6_url:match("^http://%[::1%]:%d+/%?t=%x+$") ~= nil,
+		"an IPv6 loopback bind yields http://[::1]:<port>/?t=<token>: " .. v6_url
+	)
 	-- The IPv6 wildcard shows its loopback, as live-server's own URL does.
 	local any_url = url_for("::")
-	ok(any_url:match("^http://%[::1%]:%d+/") ~= nil, "an IPv6 wildcard bind yields http://[::1]:<port>/: " .. any_url)
+	ok(
+		any_url:match("^http://%[::1%]:%d+/%?t=%x+$") ~= nil,
+		"an IPv6 wildcard bind yields http://[::1]:<port>/?t=<token>: " .. any_url
+	)
+	-- The loopback set stays 127.0.0.1 and localhost, the address takeover talks to.
+	mp.setup({ open_browser = false, instance_mode = "multi", port = 0, host = "::1" })
+	mp.start()
+	local v6_port = mp._server_instance and mp._server_instance.port or 0
+	local bare = http_get(("http://[::1]:%d/"):format(v6_port))
+	local keyed = http_get(("http://[::1]:%d/?t=%s"):format(v6_port, mp._token or ""))
+	mp.stop()
+	ok(
+		bare.status == 401 and keyed.status == 200 and keyed.body:find('data-live-token=""', 1, true) ~= nil,
+		("a ::1 bind bakes no token into its index and answers 401 without one: %d, %d"):format(
+			bare.status,
+			keyed.status
+		)
+	)
 else
-	H.skip("an IPv6 loopback bind yields http://[::1]:<port>/ (no IPv6 loopback here)")
-	H.skip("an IPv6 wildcard bind yields http://[::1]:<port>/ (no IPv6 loopback here)")
+	H.skip("an IPv6 loopback bind yields http://[::1]:<port>/?t=<token> (no IPv6 loopback here)")
+	H.skip("an IPv6 wildcard bind yields http://[::1]:<port>/?t=<token> (no IPv6 loopback here)")
+	H.skip("a ::1 bind bakes no token into its index and answers 401 without one (no IPv6 loopback here)")
 end
 
 H.finish()

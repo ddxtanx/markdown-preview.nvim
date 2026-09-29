@@ -573,7 +573,7 @@ end
 -- so the first request includes it (the page then stashes it in
 -- sessionStorage for refreshes).
 local function browser_url(port)
-	-- The LAN address shown for 0.0.0.0 is one live-server's probe never checks.
+	-- 0.0.0.0 shows the LAN address a remote browser reaches, which no probe checks.
 	local display_host = (M.config.host == "0.0.0.0") and lan_ip() or M.config.host
 	-- The IPv6 wildcard shows its loopback, as live-server's own URL does.
 	if display_host == "::" then
