@@ -353,4 +353,25 @@ H.case("Section 4: a reload and a scroll push live-server refuses are told once 
 	eq(scrolls[1] and scrolls[1].level, vim.log.levels.WARN, "the scroll notice is a warning")
 end)
 
+H.case("Section 5: a restart syncs the line the cursor already holds", function()
+	vim.cmd("buffer " .. first_buf)
+	vim.api.nvim_buf_set_lines(first_buf, 0, -1, false, { "# doc", "", "a", "b", "c" })
+	mp.start()
+	vim.api.nvim_win_set_cursor(0, { 3, 0 })
+	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = first_buf })
+	mp.stop()
+	mp.start()
+	H.defer(mp.stop)
+	local scrolls = 0
+	local real_send = ls_server.send_event
+	stub("send_event", function(inst, event, data)
+		if event == "scroll" then
+			scrolls = scrolls + 1
+		end
+		return real_send(inst, event, data)
+	end)
+	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = first_buf })
+	eq(scrolls, 1, "the first cursor event after a restart sends the scroll")
+end)
+
 H.finish()
