@@ -4,15 +4,15 @@
 
 Live **Markdown preview** for Neovim with first-class **Mermaid diagram** support.
 
-- Renders your entire `.md` file in the browser — headings, tables, code blocks, everything
-- **Relative images work** — `![](pic.png)` next to your `.md` file renders in the preview
+- Renders your entire `.md` file in the browser: headings, tables, code blocks, everything
+- **Relative images work**: `![](pic.png)` next to your `.md` file renders in the preview
 - **Mermaid diagrams** render inline as interactive SVGs (click to expand, zoom, pan, export)
-- **Instant updates** via Server-Sent Events (no polling) with **scroll sync** — browser follows your cursor
-- **LaTeX math** — inline `$...$` and display `$$...$$` rendered via KaTeX
+- **Instant updates** via Server-Sent Events (no polling) with **scroll sync**: browser follows your cursor
+- **LaTeX math**: inline `$...$` and display `$$...$$` rendered via KaTeX
 - **Syntax highlighting** for code blocks (highlight.js)
 - Dark / Light theme toggle with colored heading accents
-- **Optional Rust-powered rendering** — use [`mermaid-rs-renderer`](https://github.com/1jehuang/mermaid-rs-renderer) for ~400x faster mermaid diagrams
-- **Zero external dependencies** — no npm, no Node.js, just Neovim + your browser
+- **Optional Rust-powered rendering**: use [`mermaid-rs-renderer`](https://github.com/1jehuang/mermaid-rs-renderer) for ~400x faster mermaid diagrams
+- **Zero external dependencies**: no npm, no Node.js, just Neovim + your browser
 - Powered by [`live-server.nvim`](https://github.com/selimacerbas/live-server.nvim) (pure Lua HTTP server)
 
 ---
@@ -47,15 +47,15 @@ No prereqs. No `npm install`. Just install and go.
 Open any Markdown file, then:
 
 - **Start preview:** `:MarkdownPreview`
-- **Edit freely** — the browser updates instantly as you type
+- **Edit freely**: the browser updates instantly as you type
 - **Force refresh:** `:MarkdownPreviewRefresh`
 - **Stop:** `:MarkdownPreviewStop`
 
 > The first start opens your browser. Subsequent updates reuse the same tab.
 
-**`.mmd` / `.mermaid` files** are fully supported — the entire file is rendered as a diagram.
+**`.mmd` / `.mermaid` files** are fully supported: the entire file is rendered as a diagram.
 
-For **other non-markdown files**, place your cursor inside a fenced ```` ```mermaid ```` block — the plugin extracts and previews just that diagram.
+For **other non-markdown files**, place your cursor inside a fenced ```` ```mermaid ```` block: the plugin extracts and previews just that diagram.
 
 ---
 
@@ -67,7 +67,7 @@ For **other non-markdown files**, place your cursor inside a fenced ```` ```merm
 | `:MarkdownPreviewRefresh`| Force refresh        |
 | `:MarkdownPreviewStop`   | Stop preview         |
 
-No keymaps are set by default — map them however you like. Suggested:
+No keymaps are set by default. Map them however you like. Suggested:
 
 ```lua
 vim.keymap.set("n", "<leader>mps", "<cmd>MarkdownPreview<cr>", { desc = "Markdown: Start preview" })
@@ -81,17 +81,17 @@ vim.keymap.set("n", "<leader>mpr", "<cmd>MarkdownPreviewRefresh<cr>", { desc = "
 
 The preview opens a polished browser app with:
 
-- **Full Markdown rendering** — GitHub-flavored styling with colored heading borders, lists, tables, blockquotes, code, images, links, horizontal rules
-- **Syntax-highlighted code blocks** — powered by highlight.js, with language badges
-- **Interactive Mermaid diagrams** — rendered inline as SVGs:
+- **Full Markdown rendering**: GitHub-flavored styling with colored heading borders, lists, tables, blockquotes, code, images, links, horizontal rules
+- **Syntax-highlighted code blocks**: powered by highlight.js, with language badges
+- **Interactive Mermaid diagrams**: rendered inline as SVGs:
   - Hover a diagram to reveal the **expand button**
   - Click to open a **fullscreen overlay** with zoom, pan, fit-to-width/height, and SVG export
 - **Dark / Light theme** toggle (sun/moon icon in header)
-- **Live connection indicator** — green dot when SSE is connected
-- **Per-diagram error handling** — if one mermaid block is invalid, only that block shows an error; the rest of the page renders fine
-- **LaTeX math rendering** — `$E = mc^2$` inline and `$$\int_0^\infty$$` display math via KaTeX, plus `\begin{equation}` environments
-- **Scroll sync** — browser follows your cursor position with line-level precision
-- **Iconify auto-detection** — icon packs like `logos:google-cloud` are loaded on demand
+- **Live connection indicator**: green dot when SSE is connected
+- **Per-diagram error handling**: if one mermaid block is invalid, only that block shows an error; the rest of the page renders fine
+- **LaTeX math rendering**: `$E = mc^2$` inline and `$$\int_0^\infty$$` display math via KaTeX, plus `\begin{equation}` environments
+- **Scroll sync**: browser follows your cursor position with line-level precision
+- **Iconify auto-detection**: icon packs like `logos:google-cloud` are loaded on demand
 
 ---
 
@@ -139,8 +139,8 @@ require("markdown_preview").setup({
   bottom_padding = 0.5,
 
   hooks = {
-    on_start = nil,   -- fun(url: string)|nil — called after preview starts
-    on_stop  = nil,   -- fun()|nil — called after preview stops
+    on_start = nil,   -- fun(url: string)|nil, called after preview starts
+    on_stop  = nil,   -- fun()|nil, called after preview stops
   },
 })
 ```
@@ -162,8 +162,8 @@ require("markdown_preview").setup({
 })
 ```
 
-- **`on_start(url)`** — called after the server is ready, before the browser opens. Receives the preview URL as a string.
-- **`on_stop()`** — called after the server is stopped and all cleanup is done.
+- **`on_start(url)`**: called after the server is ready, before the browser opens. Receives the preview URL as a string.
+- **`on_stop()`**: called after the server is stopped and all cleanup is done.
 
 ### Remote access (SSH)
 
@@ -192,9 +192,9 @@ The notification will show the full URL including the auth token (e.g. `http://1
 
 ### Instance modes
 
-**Takeover** (default) — all Neovim instances share a single workspace and browser tab. The first instance to run `:MarkdownPreview` becomes the primary (starts the server on port 8421). Subsequent instances become secondaries — they write content to the shared workspace, and the server's file watcher pushes a reload to the browser. Scroll sync works across instances via HTTP event injection.
+**Takeover** (default): all Neovim instances share a single workspace and browser tab. The first instance to run `:MarkdownPreview` becomes the primary (starts the server on port 8421). Subsequent instances become secondaries: they write content to the shared workspace, and the server's file watcher pushes a reload to the browser. Scroll sync works across instances via HTTP event injection.
 
-**Multi** — each instance gets its own server on an OS-assigned port and its own browser tab. Use this for side-by-side previews of different files.
+**Multi**: each instance gets its own server on an OS-assigned port and its own browser tab. Use this for side-by-side previews of different files.
 
 ```lua
 require("markdown_preview").setup({ instance_mode = "multi" })
@@ -241,11 +241,11 @@ SSE event --> Browser
 Rendered preview (scroll preserved, no flicker)
 ```
 
-- **Rust renderer** (`mermaid_renderer = "rust"`): mermaid fences are pre-rendered to SVG via the `mmdr` CLI before writing to `content.md` — the browser receives ready-made SVGs with no mermaid.js overhead. Failed blocks fall back to browser-side rendering automatically.
+- **Rust renderer** (`mermaid_renderer = "rust"`): mermaid fences are pre-rendered to SVG via the `mmdr` CLI before writing to `content.md`. The browser receives ready-made SVGs with no mermaid.js overhead. Failed blocks fall back to browser-side rendering automatically.
 - **Markdown files**: The entire buffer is written to `content.md`
 - **Mermaid files** (`.mmd`, `.mermaid`): The entire buffer is wrapped in a mermaid code fence
 - **Other files**: The mermaid block under the cursor is extracted (via Tree-sitter or regex fallback) and wrapped in a code fence
-- **SSE** (Server-Sent Events) from `live-server.nvim` push updates instantly — no polling
+- **SSE** (Server-Sent Events) from `live-server.nvim` push updates instantly (no polling)
 - **morphdom** diffs the DOM efficiently, preserving scroll position and interactive state
 - **Takeover mode** shares a single workspace (`~/.cache/nvim/markdown-preview/shared/`) and browser tab across all Neovim instances via a lock file
 - **Multi mode** uses per-buffer workspaces under `~/.cache/nvim/markdown-preview/<hash>/` with independent servers
@@ -255,16 +255,16 @@ Rendered preview (scroll preserved, no flicker)
 ## Dependencies
 
 - **Neovim** 0.10+ (every release needed it; from this one the plugin says so at load instead of failing at first use)
-- **[live-server.nvim](https://github.com/selimacerbas/live-server.nvim)** — pure Lua HTTP server (no npm)
+- **[live-server.nvim](https://github.com/selimacerbas/live-server.nvim)**: pure Lua HTTP server (no npm)
 - **Tree-sitter** with the **Markdown** parser (recommended for mermaid block extraction)
-- **[mermaid-rs-renderer](https://github.com/1jehuang/mermaid-rs-renderer)** (optional) — `cargo install mermaid-rs-renderer` for ~400x faster mermaid rendering. Set `mermaid_renderer = "rust"` in config to enable.
+- **[mermaid-rs-renderer](https://github.com/1jehuang/mermaid-rs-renderer)** (optional): `cargo install mermaid-rs-renderer` for ~400x faster mermaid rendering. Set `mermaid_renderer = "rust"` in config to enable.
 
 Browser-side libraries are loaded from CDN (cached by your browser):
-- [markdown-it](https://github.com/markdown-it/markdown-it) — Markdown parser
-- [KaTeX](https://katex.org/) + [markdown-it-texmath](https://github.com/goessner/markdown-it-texmath) — LaTeX math rendering
-- [Mermaid](https://mermaid.js.org/) — diagram engine
-- [highlight.js](https://highlightjs.org/) — syntax highlighting
-- [morphdom](https://github.com/patrick-steele-idem/morphdom) — DOM diffing
+- [markdown-it](https://github.com/markdown-it/markdown-it): Markdown parser
+- [KaTeX](https://katex.org/) + [markdown-it-texmath](https://github.com/goessner/markdown-it-texmath): LaTeX math rendering
+- [Mermaid](https://mermaid.js.org/): diagram engine
+- [highlight.js](https://highlightjs.org/): syntax highlighting
+- [morphdom](https://github.com/patrick-steele-idem/morphdom): DOM diffing
 
 ---
 
@@ -283,7 +283,7 @@ Browser-side libraries are loaded from CDN (cached by your browser):
 
 **WSL: browser doesn't open, or preview unreachable from Windows**
 - The plugin tries `wslview`, `explorer.exe`, then `powershell.exe` to open your Windows browser. Installing [wslu](https://wslutiliti.es/wslu/) (`sudo apt install wslu`) is the most reliable option; you can also set `browser = "wslview"` explicitly.
-- If no launcher works, a notification shows the preview URL — open it manually in your Windows browser.
+- If no launcher works, a notification shows the preview URL. Open it manually in your Windows browser.
 - If `http://127.0.0.1:8421/` is unreachable from Windows, WSL2's localhost forwarding has likely broken (common after sleep, hibernate, or VPN changes). Run `wsl --shutdown` from PowerShell and reopen WSL. Alternatively bind the server to all interfaces (`host = "0.0.0.0"`) and open the URL printed by `hooks.on_start` (see *Remote access*).
 - `explorer.exe`/`powershell.exe` require Windows interop; check `/etc/wsl.conf` for `[interop] enabled=false` or `appendWindowsPath=false`.
 
@@ -296,12 +296,12 @@ Browser-side libraries are loaded from CDN (cached by your browser):
 - Check the port isn't in use: change `port` in config
 
 **Mermaid diagram not rendering**
-- The diagram syntax must be valid Mermaid — check the error chip on the diagram block
+- The diagram syntax must be valid Mermaid. Check the error chip on the diagram block
 - Invalid diagrams show the last good render + error message
 
 **Port conflict**
 - In takeover mode, stop the other instance first or change the port: `port = 9999`
-- In multi mode, ports are auto-assigned — conflicts shouldn't happen
+- In multi mode, ports are auto-assigned. Conflicts shouldn't happen
 
 **Stale lock file (takeover mode)**
 - If Neovim crashes, the lock file may persist. The next `:MarkdownPreview` detects the dead server and automatically takes over
