@@ -83,7 +83,7 @@ The preview opens a polished browser app with:
 
 - **Full Markdown rendering**: GitHub-flavored styling with colored heading borders, lists, tables, blockquotes, code, images, links, horizontal rules
 - **Syntax-highlighted code blocks**: powered by highlight.js, with language badges
-- **Interactive Mermaid diagrams**: rendered inline as SVGs:
+- **Interactive Mermaid diagrams**, rendered inline as SVGs:
   - Hover a diagram to reveal the **expand button**
   - Click to open a **fullscreen overlay** with zoom, pan, fit-to-width/height, and SVG export
 - **Dark / Light theme** toggle (sun/moon icon in header)
