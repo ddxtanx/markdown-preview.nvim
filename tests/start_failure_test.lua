@@ -357,7 +357,7 @@ for _, holder in ipairs({ "this process", "another process" }) do
 end
 
 H.case("Section 1c6: a host spelled like the error name keeps the generic notice", function()
-	mp.setup({ host = "EADDRINUSE" })
+	mp.setup({ host = "EADDRINUSE:" })
 	H.defer(function()
 		mp.setup({ host = "127.0.0.1" })
 	end)
@@ -365,8 +365,10 @@ H.case("Section 1c6: a host spelled like the error name keeps the generic notice
 	mp.start()
 	eq(#notes, 1, "one notice for the failed start")
 	-- live-server owns the refusal's wording and may change it, so the rows
-	-- pin the notice's shape: the generic prefix, the host echoed back and no
-	-- port-in-use hint from this plugin.
+	-- pin the notice's shape: the generic prefix, the host echoed back in the
+	-- double quotes live-server puts around a refused value, and no port-in-use
+	-- hint from this plugin. The host carries the colon so a detection keyed on
+	-- the error name with its colon is caught too.
 	if
 		not skipped_without_raise("1c6", {
 			"the notice is the generic one",
@@ -379,7 +381,7 @@ H.case("Section 1c6: a host spelled like the error name keeps the generic notice
 			vim.startswith(msg, "Markdown Preview: failed to start server (port 18421): "),
 			"the notice is the generic one: " .. msg
 		)
-		ok(msg:find('"EADDRINUSE"', 1, true) ~= nil, "the notice carries the host live-server refused: " .. msg)
+		ok(msg:find('"EADDRINUSE:"', 1, true) ~= nil, "the notice carries the host live-server refused: " .. msg)
 		ok(msg:find("is in use by another program", 1, true) == nil, "the notice carries no port-in-use hint: " .. msg)
 	end
 	eq(mp._server_instance, nil, "no server instance is kept")
