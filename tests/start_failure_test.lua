@@ -364,16 +364,23 @@ H.case("Section 1c6: a host spelled like the error name keeps the generic notice
 	local notes = capture_notes()
 	mp.start()
 	eq(#notes, 1, "one notice for the failed start")
-	-- The refusal's text is live-server's own.
-	if not skipped_without_raise("1c6", { "the notice is the generic one" }) then
+	-- live-server owns the refusal's wording and may change it, so the rows
+	-- pin the notice's shape: the generic prefix, the host echoed back and no
+	-- port-in-use hint from this plugin.
+	if
+		not skipped_without_raise("1c6", {
+			"the notice is the generic one",
+			"the notice carries the host live-server refused",
+			"the notice carries no port-in-use hint",
+		})
+	then
+		local msg = tostring(notes[1] and notes[1].msg)
 		ok(
-			notes[1] ~= nil
-				and vim.startswith(
-					notes[1].msg,
-					"Markdown Preview: failed to start server (port 18421): Failed to bind EADDRINUSE:"
-				),
-			"the notice is the generic one: " .. tostring(notes[1] and notes[1].msg)
+			vim.startswith(msg, "Markdown Preview: failed to start server (port 18421): "),
+			"the notice is the generic one: " .. msg
 		)
+		ok(msg:find('"EADDRINUSE"', 1, true) ~= nil, "the notice carries the host live-server refused: " .. msg)
+		ok(msg:find("is in use by another program", 1, true) == nil, "the notice carries no port-in-use hint: " .. msg)
 	end
 	eq(mp._server_instance, nil, "no server instance is kept")
 end)
