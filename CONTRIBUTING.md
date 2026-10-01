@@ -67,8 +67,8 @@ Two floors are stated here, and a change that moves one edits every place that s
 
 The Neovim floor:
 
-- `lua/markdown_preview/floor.lua`: the check and the message, which the plugin file, the module and the smoke read;
-- `plugin/markdown-preview.lua`: the header comment and the refusers' description, and the module's header comment in `lua/markdown_preview/init.lua`;
+- `lua/mdkite/floor.lua`: the check and the message, which the plugin file, the module and the smoke read;
+- `plugin/mdkite.lua`: the header comment and the refusers' description, and the module's header comment in `lua/mdkite/init.lua`;
 - the README's requirements line and a CHANGELOG entry; AGENTS.md's Conventions, its `floor_guard_test` line under Tests and its CI line; this file's prerequisites and job list;
 - `.github/workflows/ci.yml`: the `floor` job's version and name, `floor-below`'s version and name (the newest release below the floor), the comments above both, the `floor` job's comment on the minimal install and the comments of the markdown parser step;
 - `tests/floor_guard_test.lua`, which pins the text, and the comments of `tests/floor_smoke.sh`.
