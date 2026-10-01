@@ -76,4 +76,4 @@ The Neovim floor:
 The kitehost floor:
 
 - `KITEHOST_FLOOR` and `KITEHOST_FLOOR_SHA` in `.github/workflows/ci.yml` and `H.kitehost_floor` in `tests/helpers.lua`, which the local action `.github/actions/kitehost-floor` holds to one another, and `KITEHOST_FLOOR` in `lua/mdkite/init.lua`, which `start_failure_test` holds to the helper's;
-- AGENTS.md's Sibling dependency, this file's local-pairing paragraph under Run the tests (the floor and the worktree command), the README's Dependencies line and its upgrading table, a CHANGELOG entry and the bug template's version placeholder.
+- AGENTS.md's Sibling dependency, this file's local-pairing paragraph under Run the tests (the floor and the worktree command), the README's install snippet, Dependencies line, upgrading table and Troubleshooting line, the CHANGELOG's upgrading section and its entries, and the bug template's version placeholder.

@@ -62,14 +62,14 @@ For **other non-markdown files**, place your cursor inside a fenced ```` ```merm
 
 ## Upgrading from markdown-preview.nvim
 
-Before 2.0.0 this plugin was markdown-preview.nvim. Through 2.x the former spec still installs it, since GitHub redirects the repository's former name, and the former module and commands still work, each warning once a session and naming its replacement; they are removed in 3.0.0. Everything else in the table takes the new name now.
+Before 2.0.0 this plugin was markdown-preview.nvim. Through 2.x the former spec still installs it, since GitHub redirects the repository's former name; the former module and commands still work, each warning once a session and naming its replacement, and the former opt-out global still opts out. All three are removed in 3.0.0. Everything else in the table takes the new name now.
 
 | What | markdown-preview.nvim | mdkite.nvim |
 | --- | --- | --- |
 | lazy.nvim spec | `"selimacerbas/markdown-preview.nvim"` | `"selimacerbas/mdkite.nvim"` |
 | Server dependency | `"selimacerbas/live-server.nvim"` | `"selimacerbas/kitehost.nvim"`, v2.0.0 or newer (live-server.nvim's new name) |
 | Module | `require("markdown_preview")` | `require("mdkite")` |
-| Notice prefix | `Markdown Preview:` | `mdkite:` on every notice but a deprecation warning, which is Neovim's own text (`:MarkdownPreview is deprecated, use :MdKite start instead.`) |
+| Notice prefix | `Markdown Preview:` | `mdkite:` on every notice this plugin makes (the server's own start `kitehost:`), but a deprecation warning, which is Neovim's own text (`:MarkdownPreview is deprecated, use :MdKite start instead.`) |
 | Cache directory | `stdpath("cache")/markdown-preview` | `stdpath("cache")/mdkite` |
 | Opt-out global | `vim.g.loaded_markdown_preview` | `vim.g.loaded_mdkite` (the former one still opts out) |
 | Auto-refresh augroup | `MarkdownPreviewAuto` | `MdKiteAuto` |
