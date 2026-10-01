@@ -103,6 +103,16 @@ r = http_get(("http://127.0.0.1:%d/content.md?t=%s"):format(port, mp._token))
 eq(r.status, 200, "/content.md with correct token is 200")
 ok(r.body:find("hello") ~= nil, "/content.md body contains buffer text")
 
+-- A DNS-rebinding page reaches 127.0.0.1 under its own name, and the
+-- loopback index carries the token, so kitehost's Host check is what
+-- keeps the page out.
+r = http_get(("http://127.0.0.1:%d/"):format(port), { "Host: rebind.example" })
+eq(r.status, 421, "the index under a foreign Host is 421")
+r = http_get(("http://127.0.0.1:%d/content.md?t=%s"):format(port, mp._token), { "Host: rebind.example" })
+eq(r.status, 421, "content.md with the token under a foreign Host is 421")
+r = http_get(("http://127.0.0.1:%d/"):format(port), { "Host: localhost:9999" })
+eq(r.status, 200, "an ssh -L tunnel's Host (localhost, another port) is served")
+
 H.section("Section 2: stop and verify cleanup")
 mp.stop()
 ok(mp._token == nil, "_token cleared after stop")
