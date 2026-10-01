@@ -18,7 +18,7 @@ indent_size = 2
 [*.md]
 trim_trailing_whitespace = false
 
-# assets/index.html, the one HTML file this plugin ships (live-server.nvim
+# assets/index.html, the one HTML file this plugin ships (kitehost.nvim
 # ships none, so its copy of this file has no such block).
 [*.html]
 indent_style = space

@@ -4,37 +4,61 @@ All notable changes to this project; versions follow SemVer. From `[Unreleased]`
 
 ## [Unreleased]
 
+### Upgrading from markdown-preview.nvim
+
+The plugin is mdkite.nvim from this release, and the server it runs on is kitehost.nvim, live-server.nvim's name from its v2.0.0, which this release requires. Through 2.x the former lazy.nvim spec still installs it, since GitHub redirects the repository's former name, and the former module and commands still work, each warning once a session and naming its replacement; they are removed in 3.0.0. Everything else in the table takes the new name now.
+
+| What | Before 2.0.0 | From 2.0.0 |
+| --- | --- | --- |
+| Repository and lazy.nvim spec | `selimacerbas/markdown-preview.nvim` | `selimacerbas/mdkite.nvim` |
+| Server dependency | `selimacerbas/live-server.nvim` | `selimacerbas/kitehost.nvim`, v2.0.0 or newer |
+| Module | `require("markdown_preview")` | `require("mdkite")` |
+| Commands | `:MarkdownPreview`, `:MarkdownPreviewRefresh`, `:MarkdownPreviewStop` | `:MdKite` with `start`, `refresh` and `stop`, one for each former command in that order, and the new `toggle`, completed by `<Tab>`, none taking an argument; a bare `:MdKite` runs `start` |
+| Notices | `Markdown Preview: ...` | `mdkite: ...` on every notice but a deprecation warning, which is Neovim's own text (`:MarkdownPreview is deprecated, use :MdKite start instead.`) |
+| Cache directory | `stdpath("cache")/markdown-preview` | `stdpath("cache")/mdkite` |
+| Opt-out global | `vim.g.loaded_markdown_preview` | `vim.g.loaded_mdkite`; the former one still opts out |
+| Auto-refresh augroup | `MarkdownPreviewAuto` | `MdKiteAuto` |
+| Browser console prefix | `[markdown-preview]` | `[mdkite]` |
+| Page title | `Markdown Preview` | `mdkite` |
+
+In takeover mode, a preview of a release before 2.0.0 still running in another Neovim keeps its lock under the former cache directory: a start names it and its port in one error, starts nothing beside it and writes nothing under that directory.
+
+A lazy.nvim spec that relies on `opts` or `config = true` and is named after neither repository (a `name` or `dir` of its own, or a fork under another name) sets `main = "mdkite"`: two top-level modules ship through 2.x, `mdkite` and `markdown_preview`, so lazy.nvim cannot choose the one its `opts` go to and reports `Lua module not found for config of <name>`. The new spec, the former one, a fork that keeps the name mdkite.nvim and a spec with its own `config` function need none.
+
 ### Added
 
-- `lazy.lua`: lazy.nvim installs live-server.nvim from this plugin's own declaration, so a spec with no `dependencies` line still gets it.
+- `lazy.lua`: lazy.nvim installs kitehost.nvim from this plugin's own declaration, so a spec with no `dependencies` line still gets it.
+- `:MdKite toggle` starts the preview, or stops the one running, a joined one included.
 
 ### Changed
 
-- The start-failure notification reads `Markdown Preview: failed to start server (port <port>): <reason>`.
+- **BREAKING:** The plugin runs on kitehost.nvim v2.0.0 or newer (the upgrading section above). With an older server on the runtimepath, or none, a start refuses with one error, `mdkite: requires kitehost.nvim v2.0.0 or newer; install or update selimacerbas/kitehost.nvim`, where a missing server raised a Lua error as the plugin loaded.
+- The start-failure notification reads `mdkite: failed to start server (port <port>): <reason>`.
 - `vim.uv` replaces the deprecated `vim.loop` throughout.
-- When the port is taken by another program, the start-failure notification says so and how to pick another: `Markdown Preview: port <port> is in use by another program. Set port to a free one in setup(), or port = 0 with instance_mode = "multi" for an OS-assigned port.` A port the OS assigns keeps the generic notification, whose reason names the port.
+- When the port is taken by another program, the start-failure notification says so and how to pick another: `mdkite: port <port> is in use by another program. Set port to a free one in setup(), or port = 0 with instance_mode = "multi" for an OS-assigned port.` A port the OS assigns keeps the generic notification, whose reason names the port.
 - When the server binds `127.0.0.1` (the default `host`, and what `"localhost"` binds), the preview URL no longer carries the `?t=` token; a server bound to any other address keeps it. The address the server bound decides, not the `host` setting: `"localhost"` opens `http://127.0.0.1:<port>/`, since a browser tries `localhost`'s `::1` first, and a takeover secondary follows the address the primary's lock records. The URL is what lands in browser history, its sync and the process list, so the token stays out of all three.
 
 ### Removed
 
-- **BREAKING:** Neovim 0.9, which the README listed as supported. Every release since v1.0.0 needed Neovim 0.10 and failed at first use on 0.9; the requirement is now checked at load, so on 0.9 the plugin shows one notification, "markdown-preview.nvim requires Neovim 0.10 or newer", and every command refuses with the same message.
+- **BREAKING:** Neovim 0.9, which the README listed as supported. Every release since v1.0.0 needed Neovim 0.10 and failed at first use on 0.9; the requirement is now checked at load, so on 0.9 the plugin shows one notification, "mdkite: requires Neovim 0.10 or newer", and every command refuses with the same message.
 - The unreferenced 7 MB demo gif, so a fresh checkout is smaller.
 
 ### Fixed
 
 - A takeover-mode lock file that cannot be made private fails the start with the start-failure notification; before, the server stayed running with an empty lock and the start raised a Lua error.
-- A preview that fails to start (a taken port, an address live-server cannot bind, a lock file that cannot be made private) keeps no autocmds, no session token and no workspace pointer, and drops a takeover role it held as a secondary; before, six autocmds kept refreshing a preview that did not exist.
-- When live-server refuses to switch the preview to another buffer, the notice reads `Markdown Preview: could not retarget: <reason>` and the preview keeps showing the buffer it showed, its text and images included. When the server reports file watching off after a switch, a warning says that changes made outside this editor may not refresh the preview. A reload or scroll update live-server refuses is reported once per preview server. Before, all three went unreported.
-- An IPv6 `host` such as `"::1"`, with `instance_mode = "multi"`, gives a preview URL in brackets, `http://[::1]:<port>/?t=<token>`, which browsers open; the token stays, since only a `127.0.0.1` bind's page carries it. The IPv6 wildcard `"::"`, however it is spelled, shows `http://[::1]:<port>/?t=<token>`, as live-server.nvim does, and an IPv4-mapped address such as `"::ffff:127.0.0.1"` shows its IPv4 form.
-- When a second Neovim fails to start a takeover preview on the port another Neovim's preview holds (its check for the running preview timed out, say), the running preview keeps serving its own buffer and keeps its lock file, and the notification adds that another Neovim's preview may hold the port; before, the second instance overwrote the preview's files with its own buffer and a token the server refuses, and removed the lock. This needs live-server.nvim with the start refusal of a held port: on v1.5.0 a start on a held port does not fail.
-- A session token that cannot be made fails the start with one error notification, before any server starts. A failure after the preview server started (the preview's files, the lock file, an `auto_refresh_events` entry Neovim does not know) stops the server and shows one error notification with the reason and no Lua source position; before, the server kept running and `:MarkdownPreview` raised a Lua error. The same holds when joining another Neovim's preview, when the workspace directory cannot be created, and when switching buffers, where a failed switch returns the preview to the buffer it showed. A write that fails no longer empties the file the preview serves, and a lock file whose port is not a valid port is treated as absent.
-- Changing `host` with `setup()` while a preview runs no longer makes the next `:MarkdownPreview` on another buffer refuse; the new host applies to the next start.
-- A Neovim that joined another's takeover preview reports a scroll update the running preview refuses (after a restart with a new token) or cannot receive (the preview is gone) once, and again after `:MarkdownPreview` joins anew; before, it said nothing.
+- A preview that fails to start (a taken port, an address kitehost cannot bind, a lock file that cannot be made private) keeps no autocmds, no session token and no workspace pointer, and drops a takeover role it held as a secondary; before, six autocmds kept refreshing a preview that did not exist.
+- When kitehost refuses to switch the preview to another buffer, the notice reads `mdkite: could not retarget: <reason>` and the preview keeps showing the buffer it showed, its text and images included. When the server reports file watching off after a switch, a warning says that changes made outside this editor may not refresh the preview. A reload or scroll update kitehost refuses is reported once per preview server. Before, all three went unreported.
+- An IPv6 `host` such as `"::1"`, with `instance_mode = "multi"`, gives a preview URL in brackets, `http://[::1]:<port>/?t=<token>`, which browsers open; the token stays, since only a `127.0.0.1` bind's page carries it. The IPv6 wildcard `"::"`, however it is spelled, shows `http://[::1]:<port>/?t=<token>`, as kitehost.nvim does, and an IPv4-mapped address such as `"::ffff:127.0.0.1"` shows its IPv4 form.
+- When a second Neovim fails to start a takeover preview on the port another Neovim's preview holds (its check for the running preview timed out, say), the running preview keeps serving its own buffer and keeps its lock file, and the notification adds that another Neovim's preview may hold the port; before, the second instance overwrote the preview's files with its own buffer and a token the server refuses, and removed the lock.
+- A takeover start joins another Neovim's preview only while the process its lock names runs and the server on the lock's port takes the lock's token and refuses a request without one; before, anything listening on that port counted, so a start could join a crashed preview's lock whose port another program had since taken and send that program its scroll updates, token included.
+- A session token that cannot be made fails the start with one error notification, before any server starts. A failure after the preview server started (the preview's files, the lock file, an `auto_refresh_events` entry Neovim does not know) stops the server and shows one error notification with the reason and no Lua source position; before, the server kept running and the start raised a Lua error. The same holds when joining another Neovim's preview, when the workspace directory cannot be created, and when switching buffers, where a failed switch returns the preview to the buffer it showed. A write that fails no longer empties the file the preview serves, and a lock file whose port is not a valid port is treated as absent.
+- Changing `host` with `setup()` while a preview runs no longer makes the next `:MdKite start` on another buffer refuse; the new host applies to the next start.
+- A Neovim that joined another's takeover preview reports a scroll update the running preview refuses (after a restart with a new token) or cannot receive (the preview is gone) once, and again after `:MdKite start` joins anew; before, it said nothing.
 - Stopping the preview within 200 ms of starting it or switching buffers no longer raises a Lua error from the pending browser open, and no browser opens for the stopped preview.
 
 ### Security
 
-- The takeover-mode lock file is made private (mode 0600) on the open file before the session token is written to it, whatever the file was before; the open's own mode applies only to a file it creates. No released version left the token readable by others: `:MarkdownPreview` has removed the lock before every write since the token joined it in v1.8.0, and the 0644 lock files of v1.7.0 and earlier held no token. The loopback preview page still carries the token (SECURITY.md).
+- The takeover-mode lock file is made private (mode 0600) on the open file before the session token is written to it, whatever the file was before; the open's own mode applies only to a file it creates. No released version left the token readable by others: a start has removed the lock before every write since the token joined it in v1.8.0, and the 0644 lock files of v1.7.0 and earlier held no token. The loopback preview page still carries the token (SECURITY.md).
 
 ## [1.10.0] - 2026-07-07
 
@@ -240,7 +264,7 @@ Complete rewrite from `mermaid-playground.nvim` to `markdown-preview.nvim`.
 }
 ```
 
-[Unreleased]: https://github.com/selimacerbas/markdown-preview.nvim/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/selimacerbas/mdkite.nvim/compare/v1.10.0...HEAD
 [1.10.0]: https://github.com/selimacerbas/markdown-preview.nvim/releases/tag/v1.10.0
 [1.9.0]: https://github.com/selimacerbas/markdown-preview.nvim/releases/tag/v1.9.0
 [1.8.0]: https://github.com/selimacerbas/markdown-preview.nvim/releases/tag/v1.8.0

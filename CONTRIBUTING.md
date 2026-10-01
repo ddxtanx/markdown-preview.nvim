@@ -1,8 +1,8 @@
 # Contributing
 
-Issues and PRs are welcome. This file names the commands the CI runs so a green PR is a local run away: `make test`, `make fmt-check`, `make lint-text`, `make lint-blame` and `make shellcheck` (the POSIX scripts and hooks read as sh, which the `lint-workflows` job runs with the actionlint image's shellcheck) run here as they run in CI, and the gating `browser` job runs locally as `make test-browser`. The `lint-workflows` job also runs actionlint, which no make target wraps: run `actionlint .github/workflows/*.yml` locally (`brew install actionlint`, whose formula brings shellcheck; a binary from <https://github.com/rhysd/actionlint/releases> does not, and without shellcheck on PATH actionlint skips its shell checks, so a local green can differ from CI's). The `floor` (Neovim 0.10.0), `windows`, `upstream` (live-server.nvim `main`) and `commits` jobs run only in CI; `floor-below` (Neovim 0.9.5) runs `tests/floor_smoke.sh`, which runs locally too with a Neovim below the floor first on PATH; the commit-msg hook below runs the `commits` job's policy locally. The `nightly` workflow runs the suites weekly against Neovim nightly and live-server `main`; GitHub disables a scheduled workflow after 60 days without a commit, and `gh workflow enable nightly` turns it back on.
+Issues and PRs are welcome. This file names the commands the CI runs so a green PR is a local run away: `make test`, `make fmt-check`, `make lint-text`, `make lint-blame` and `make shellcheck` (the POSIX scripts and hooks read as sh, which the `lint-workflows` job runs with the actionlint image's shellcheck) run here as they run in CI, and the gating `browser` job runs locally as `make test-browser`. The `lint-workflows` job also runs actionlint, which no make target wraps: run `actionlint .github/workflows/*.yml` locally (`brew install actionlint`, whose formula brings shellcheck; a binary from <https://github.com/rhysd/actionlint/releases> does not, and without shellcheck on PATH actionlint skips its shell checks, so a local green can differ from CI's). The `floor` (Neovim 0.10.0), `windows`, `upstream` (kitehost.nvim `main`) and `commits` jobs run only in CI; `floor-below` (Neovim 0.9.5) runs `tests/floor_smoke.sh`, which runs locally too with a Neovim below the floor first on PATH; the commit-msg hook below runs the `commits` job's policy locally. The `nightly` workflow runs the suites weekly against Neovim nightly and kitehost `main`; GitHub disables a scheduled workflow after 60 days without a commit, and `gh workflow enable nightly` turns it back on.
 
-You need Neovim 0.10 or newer, a live-server.nvim checkout (found as below), curl for the five suites that make HTTP requests, bun for the formatter and the browser test, and Playwright's headless Chromium for the browser test (`cd tests/browser && bun install --frozen-lockfile && bun x playwright install --only-shell chromium`: the install first, so `bun x` runs the pinned Playwright and not npm's latest). The browser test's lockfile needs bun 1.4.0 or newer.
+You need Neovim 0.10 or newer, a kitehost.nvim checkout (found as below), curl for the five suites that make HTTP requests, bun for the formatter and the browser test, and Playwright's headless Chromium for the browser test (`cd tests/browser && bun install --frozen-lockfile && bun x playwright install --only-shell chromium`: the install first, so `bun x` runs the pinned Playwright and not npm's latest). The browser test's lockfile needs bun 1.4.0 or newer.
 
 ## Run the tests
 
@@ -14,7 +14,7 @@ runs every suite through `tests/run.sh`, the same loop CI runs, and then `tests/
 
 The absolute name is the one `tests/run.sh` passes: a relative one is made absolute against the physical directory, which loses a link the checkout is reached through (`tests/helpers.lua` says why that matters).
 
-`tests/helpers.lua` finds live-server.nvim at `$LIVE_SERVER_RTP`, `./live-server-rtp` or `../live-server.nvim`, in that order, and isolates the run from your own Neovim cache. The gating CI jobs run against the live-server floor (v1.5.0, pinned by commit in `ci.yml`), while a sibling clone is usually live-server `main`, the `upstream` job's pairing; to run locally against the floor the gates use, point `LIVE_SERVER_RTP` at a checkout of v1.5.0, or make `./live-server-rtp` a worktree of it: `git -C ../live-server.nvim worktree add "$PWD/live-server-rtp" v1.5.0`. There the rows that need a newer live-server (a start on a held port that raises, its refusal texts, `localhost` bound as `127.0.0.1`) skip, each naming what the floor lacks; against live-server `main` none skips.
+`tests/helpers.lua` finds kitehost.nvim at `$KITEHOST_RTP` (else `$LIVE_SERVER_RTP`, its name before kitehost 2.0.0, read through 2.x), `./kitehost-rtp`, `../kitehost.nvim` or `../live-server.nvim` (a clone under its name before 2.0.0), in that order, and isolates the run from your own Neovim cache. The gating CI jobs run against the kitehost floor (v2.0.0, pinned by commit in `ci.yml`), while a sibling clone is usually kitehost `main`, the `upstream` job's pairing; to run locally against the floor the gates use, point `KITEHOST_RTP` at a checkout of v2.0.0, or make `./kitehost-rtp` a worktree of it: `git -C ../kitehost.nvim worktree add "$PWD/kitehost-rtp" v2.0.0`. On kitehost two rows of `start_failure_test` skip, each naming why: they measure the token gate on a server without kitehost's dot rule.
 
 ## Run the browser test
 
@@ -24,7 +24,7 @@ runs `tests/browser/smoke.test.ts`: a headless Neovim serves a buffer, Playwrigh
 
 ## Shared files
 
-markdown-preview.nvim and live-server.nvim share their test harness, their hooks, the Makefile and the PR template. `tests/parity.sh` lists every shared file and how it is compared, and `make parity SIBLING=../live-server.nvim` compares them with a sibling checkout. live-server.nvim's copy is the source: a change to a shared file lands there first and is copied here.
+mdkite.nvim and kitehost.nvim share their test harness, their hooks, the Makefile and the PR template. `tests/parity.sh` lists every shared file and how it is compared, and `make parity SIBLING=../kitehost.nvim` compares them with a sibling checkout. kitehost.nvim's copy is the source: a change to a shared file lands there first and is copied here.
 
 ## Format
 
@@ -58,12 +58,12 @@ A pull request Dependabot opens is machine-authored, keyed on the pull request's
 
 1. Move the `Unreleased` section of `CHANGELOG.md` under the new version and date, add the version's link definition under `[Unreleased]`'s (newest first), and start the `[Unreleased]` compare link at the new tag.
 2. Tag only a commit whose `ci-ok` is green (`gh run list --commit <sha>`): `git tag -a vX.Y.Z -m "vX.Y.Z"`, `git push origin vX.Y.Z`. The tags v1.0.0 to v1.2.1 are annotated and v1.3.0 to v1.10.0 are lightweight, so `git describe` needs `--tags` until the next annotated tag.
-   The `release tags` ruleset refuses moving or deleting a `v*` tag, so a mistaken tag is fixed by editing the ruleset once (Settings, Rules). The live-server floor is pinned by tag and commit (`LIVE_SERVER_FLOOR` and `LIVE_SERVER_FLOOR_SHA` in `ci.yml`, beside `H.live_server_floor` in `tests/helpers.lua`), and live-server's own `release tags` ruleset keeps that tag from moving; the local action `.github/actions/live-server-floor` reds the gating jobs when the three disagree.
+   The `release tags` ruleset refuses moving or deleting a `v*` tag, so a mistaken tag is fixed by editing the ruleset once (Settings, Rules). The kitehost floor is pinned by tag and commit (`KITEHOST_FLOOR` and `KITEHOST_FLOOR_SHA` in `ci.yml`, beside `H.kitehost_floor` in `tests/helpers.lua`), and kitehost's own `release tags` ruleset keeps that tag from moving; the local action `.github/actions/kitehost-floor` reds the gating jobs when the three disagree.
 3. `gh release create vX.Y.Z --verify-tag --title "vX.Y.Z" --notes-file <the section as a file>`.
 
 ### Moving a floor
 
-Two floors are stated here, and a change that moves one edits every place that states it, together (`git grep -n '0\.10'` and `git grep -n 'v1\.5\.0'` find them, beside what states no floor: harness comments that name a version they were measured on, and the CHANGELOG's release links and past release notes).
+Two floors are stated here, and a change that moves one edits every place that states it, together (`git grep -n '0\.10'` and `git grep -n 'v2\.0\.0'` find them, beside what states no floor: harness comments that name a version they were measured on, and the CHANGELOG's release links and past release notes).
 
 The Neovim floor:
 
@@ -73,7 +73,7 @@ The Neovim floor:
 - `.github/workflows/ci.yml`: the `floor` job's version and name, `floor-below`'s version and name (the newest release below the floor), the comments above both, the `floor` job's comment on the minimal install and the comments of the markdown parser step;
 - `tests/floor_guard_test.lua`, which pins the text, and the comments of `tests/floor_smoke.sh`.
 
-The live-server floor:
+The kitehost floor:
 
-- `LIVE_SERVER_FLOOR` and `LIVE_SERVER_FLOOR_SHA` in `.github/workflows/ci.yml` and `H.live_server_floor` in `tests/helpers.lua`, which the local action `.github/actions/live-server-floor` holds to one another;
-- AGENTS.md's Sibling dependency, this file's local-pairing paragraph under Run the tests (the floor and the worktree command), a CHANGELOG entry and the bug template's version placeholder.
+- `KITEHOST_FLOOR` and `KITEHOST_FLOOR_SHA` in `.github/workflows/ci.yml` and `H.kitehost_floor` in `tests/helpers.lua`, which the local action `.github/actions/kitehost-floor` holds to one another, and `KITEHOST_FLOOR` in `lua/mdkite/init.lua`, which `start_failure_test` holds to the helper's;
+- AGENTS.md's Sibling dependency, this file's local-pairing paragraph under Run the tests (the floor and the worktree command), the README's Dependencies line and its upgrading table, a CHANGELOG entry and the bug template's version placeholder.

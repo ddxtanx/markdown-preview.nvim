@@ -27,8 +27,9 @@ local COMMAND_PREFIXES = { "MdKite", "MarkdownPreview" }
 local FEATURES = { "uv", "fs.joinpath", "uri_encode" }
 
 -- The documented commands, sorted, and each documented subcommand as a
--- command line: the README's command table, whose rows name the command in
--- its own backticks and the subcommand in the next column.
+-- command line: the README's tables, whose rows name a command in its own
+-- backticks, the command table's with the subcommand in the next column
+-- and the upgrading table's with the command it runs.
 local documented, subcommands = {}, {}
 for line in io.lines(H.root .. "/README.md") do
 	local name = line:match("^| `:(%w+)`")
@@ -42,8 +43,15 @@ for line in io.lines(H.root .. "/README.md") do
 end
 -- Every command the plugin defines: the documented ones and, through the
 -- 2.x releases, the ones from before the rename, refused below the floor
--- as the documented ones are.
-local commands = vim.list_extend(vim.deepcopy(documented), DEPRECATED)
+-- as the documented ones are. Those the README does not list are kept
+-- apart: tests/floor_smoke.sh drives below the floor only what it lists.
+local commands, unlisted = vim.deepcopy(documented), {}
+for _, name in ipairs(DEPRECATED) do
+	if not vim.tbl_contains(commands, name) then
+		table.insert(commands, name)
+		table.insert(unlisted, name)
+	end
+end
 table.sort(documented)
 table.sort(commands)
 documented = table.concat(documented, " ")
@@ -171,6 +179,7 @@ end
 H.section("Section 1: below the floor")
 H.ok(documented ~= "", "the README's command table lists the commands: " .. documented)
 H.ok(#subcommands > 0, "the README's command table lists the subcommands: " .. table.concat(subcommands, ", "))
+H.eq(table.concat(unlisted, " "), "", "the README's upgrading table lists each command from before the rename")
 -- A config that sets a load guard has opted out, and an old-Neovim host
 -- that shares the config must not be told at every start; the guard from
 -- before the rename still opts out.

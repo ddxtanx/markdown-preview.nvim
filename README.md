@@ -1,6 +1,6 @@
-# markdown-preview.nvim
+# mdkite.nvim
 
-> **Note:** This repository was previously known as `mermaid-playground.nvim`. It has been renamed and rewritten to support full Markdown preview alongside first-class Mermaid diagram support.
+> **Note:** Before 2.0.0 this plugin was `markdown-preview.nvim`: [Upgrading from markdown-preview.nvim](#upgrading-from-markdown-previewnvim) maps the names it had then. Before that it was `mermaid-playground.nvim`, renamed and rewritten to support full Markdown preview alongside first-class Mermaid diagram support.
 
 Live **Markdown preview** for Neovim with first-class **Mermaid diagram** support.
 
@@ -13,7 +13,7 @@ Live **Markdown preview** for Neovim with first-class **Mermaid diagram** suppor
 - Dark / Light theme toggle with colored heading accents
 - **Optional Rust-powered rendering**: use [`mermaid-rs-renderer`](https://github.com/1jehuang/mermaid-rs-renderer) for ~400x faster mermaid diagrams
 - **Zero external dependencies**: no npm, no Node.js, just Neovim + your browser
-- Powered by [`live-server.nvim`](https://github.com/selimacerbas/live-server.nvim) (pure Lua HTTP server)
+- Powered by [`kitehost.nvim`](https://github.com/selimacerbas/kitehost.nvim) (pure Lua HTTP server)
 
 ---
 
@@ -23,12 +23,12 @@ Live **Markdown preview** for Neovim with first-class **Mermaid diagram** suppor
 
 ```lua
 {
-  "selimacerbas/markdown-preview.nvim",
-  -- a live-server.nvim checkout under another dir name needs its spec to
-  -- say name = "live-server.nvim", or lazy.nvim clones upstream beside it
-  dependencies = { "selimacerbas/live-server.nvim" },
+  "selimacerbas/mdkite.nvim",
+  -- a kitehost.nvim checkout under another dir name needs its spec to
+  -- say name = "kitehost.nvim", or lazy.nvim clones upstream beside it
+  dependencies = { "selimacerbas/kitehost.nvim" },
   config = function()
-    require("markdown_preview").setup({
+    require("mdkite").setup({
       -- all optional; sane defaults shown
       instance_mode = "takeover",  -- "takeover" (one tab) or "multi" (tab per instance)
       port = 0,                    -- 0 = auto (8421 for takeover, OS-assigned for multi)
@@ -46,16 +46,43 @@ No prereqs. No `npm install`. Just install and go.
 
 Open any Markdown file, then:
 
-- **Start preview:** `:MarkdownPreview`
+- **Start preview:** `:MdKite` (or `:MdKite start`)
 - **Edit freely**: the browser updates instantly as you type
-- **Force refresh:** `:MarkdownPreviewRefresh`
-- **Stop:** `:MarkdownPreviewStop`
+- **Force refresh:** `:MdKite refresh`
+- **Stop:** `:MdKite stop`
 
 > The first start opens your browser. Subsequent updates reuse the same tab.
 
 **`.mmd` / `.mermaid` files** are fully supported: the entire file is rendered as a diagram.
 
 For **other non-markdown files**, place your cursor inside a fenced ```` ```mermaid ```` block: the plugin extracts and previews just that diagram.
+
+---
+
+## Upgrading from markdown-preview.nvim
+
+Before 2.0.0 this plugin was markdown-preview.nvim. Through 2.x the former spec still installs it, since GitHub redirects the repository's former name, and the former module and commands still work, each warning once a session and naming its replacement; they are removed in 3.0.0. Everything else in the table takes the new name now.
+
+| What | markdown-preview.nvim | mdkite.nvim |
+| --- | --- | --- |
+| lazy.nvim spec | `"selimacerbas/markdown-preview.nvim"` | `"selimacerbas/mdkite.nvim"` |
+| Server dependency | `"selimacerbas/live-server.nvim"` | `"selimacerbas/kitehost.nvim"`, v2.0.0 or newer (live-server.nvim's new name) |
+| Module | `require("markdown_preview")` | `require("mdkite")` |
+| Notice prefix | `Markdown Preview:` | `mdkite:` on every notice but a deprecation warning, which is Neovim's own text (`:MarkdownPreview is deprecated, use :MdKite start instead.`) |
+| Cache directory | `stdpath("cache")/markdown-preview` | `stdpath("cache")/mdkite` |
+| Opt-out global | `vim.g.loaded_markdown_preview` | `vim.g.loaded_mdkite` (the former one still opts out) |
+| Auto-refresh augroup | `MarkdownPreviewAuto` | `MdKiteAuto` |
+| Browser console prefix | `[markdown-preview]` | `[mdkite]` |
+
+| Command before 2.0.0, removed in 3.0.0 | Runs, after a warning once a session |
+| --- | --- |
+| `:MarkdownPreview` | `:MdKite start` |
+| `:MarkdownPreviewRefresh` | `:MdKite refresh` |
+| `:MarkdownPreviewStop` | `:MdKite stop` |
+
+In takeover mode, a preview of a release before 2.0.0 still running in another Neovim keeps its lock under the former cache directory: `:MdKite` names it and its port in one error and starts nothing beside it; stop it there, then run `:MdKite` again.
+
+Through 2.x the plugin ships two top-level modules, `mdkite` and `markdown_preview`, and lazy.nvim finds the module an `opts` table goes to by the spec's name. A spec that relies on `opts` or `config = true` and is named after neither repository (a `name` or `dir` of your own, or a fork under another name) sets `main = "mdkite"`: lazy.nvim cannot choose between the two modules for it and reports `Lua module not found for config of <name>`. `"selimacerbas/mdkite.nvim"`, the former spec, a fork that keeps the name mdkite.nvim and a spec with its own `config` function need none.
 
 ---
 
@@ -68,12 +95,14 @@ For **other non-markdown files**, place your cursor inside a fenced ```` ```merm
 | `:MdKite` | `refresh`  | Force refresh                                |
 | `:MdKite` | `toggle`   | Start preview, or stop the one running       |
 
+No subcommand takes an argument, and `<Tab>` completes them; an unknown name, or an argument after one, is one error notice and runs nothing. The commands before 2.0.0 are under [Upgrading from markdown-preview.nvim](#upgrading-from-markdown-previewnvim).
+
 No keymaps are set by default. Map them however you like. Suggested:
 
 ```lua
-vim.keymap.set("n", "<leader>mps", "<cmd>MarkdownPreview<cr>", { desc = "Markdown: Start preview" })
-vim.keymap.set("n", "<leader>mpS", "<cmd>MarkdownPreviewStop<cr>", { desc = "Markdown: Stop preview" })
-vim.keymap.set("n", "<leader>mpr", "<cmd>MarkdownPreviewRefresh<cr>", { desc = "Markdown: Refresh preview" })
+vim.keymap.set("n", "<leader>mps", "<cmd>MdKite start<cr>", { desc = "Markdown: Start preview" })
+vim.keymap.set("n", "<leader>mpS", "<cmd>MdKite stop<cr>", { desc = "Markdown: Stop preview" })
+vim.keymap.set("n", "<leader>mpr", "<cmd>MdKite refresh<cr>", { desc = "Markdown: Refresh preview" })
 ```
 
 ---
@@ -99,7 +128,7 @@ The preview opens a polished browser app with:
 ## Configuration
 
 ```lua
-require("markdown_preview").setup({
+require("mdkite").setup({
   instance_mode = "takeover",           -- "takeover" or "multi" (see below)
   port = 0,                             -- 0 = auto (8421 for takeover, OS-assigned for multi)
   host = "127.0.0.1",                   -- bind address; "0.0.0.0" for network access (see Remote access)
@@ -151,7 +180,7 @@ require("markdown_preview").setup({
 Lifecycle callbacks that run when the preview starts or stops. Use them for notifications, logging, or triggering other actions.
 
 ```lua
-require("markdown_preview").setup({
+require("mdkite").setup({
   hooks = {
     on_start = function(url)
       vim.notify("Preview started: " .. url, vim.log.levels.INFO)
@@ -171,12 +200,12 @@ require("markdown_preview").setup({
 If you're running Neovim on a remote machine over SSH and want to view the preview on your local machine, bind to all interfaces and use `on_start` to print the URL:
 
 ```lua
-require("markdown_preview").setup({
+require("mdkite").setup({
   host = "0.0.0.0",
   open_browser = false,
   hooks = {
     on_start = function(url)
-      vim.notify("Markdown Preview: " .. url, vim.log.levels.INFO)
+      vim.notify("mdkite: " .. url, vim.log.levels.INFO)
     end,
   },
 })
@@ -193,12 +222,12 @@ The notification will show the full URL including the auth token (e.g. `http://1
 
 ### Instance modes
 
-**Takeover** (default): all Neovim instances share a single workspace and browser tab. The first instance to run `:MarkdownPreview` becomes the primary (starts the server on port 8421). Subsequent instances become secondaries: they write content to the shared workspace, and the server's file watcher pushes a reload to the browser. Scroll sync works across instances via HTTP event injection.
+**Takeover** (default): all Neovim instances share a single workspace and browser tab. The first instance to run `:MdKite` becomes the primary (starts the server on port 8421). Subsequent instances become secondaries: they write content to the shared workspace, and the server's file watcher pushes a reload to the browser. Scroll sync works across instances via HTTP event injection.
 
 **Multi**: each instance gets its own server on an OS-assigned port and its own browser tab. Use this for side-by-side previews of different files.
 
 ```lua
-require("markdown_preview").setup({ instance_mode = "multi" })
+require("mdkite").setup({ instance_mode = "multi" })
 ```
 
 ---
@@ -209,7 +238,7 @@ require("markdown_preview").setup({ instance_mode = "multi" })
 graph LR
     A[Neovim Buffer] -->|write| B[content.md]
     A -.->|optional: mmdr| B
-    B -->|fs watch| C[live-server.nvim]
+    B -->|fs watch| C[kitehost.nvim]
     C -->|SSE| D[Browser]
     D --> E[markdown-it]
     D --> F[mermaid.js]
@@ -230,7 +259,7 @@ Neovim buffer
     v
 workspace/content.md
     |
-    |  (live-server.nvim detects change)
+    |  (kitehost.nvim detects change)
     v
 SSE event --> Browser
     |
@@ -246,17 +275,17 @@ Rendered preview (scroll preserved, no flicker)
 - **Markdown files**: The entire buffer is written to `content.md`
 - **Mermaid files** (`.mmd`, `.mermaid`): The entire buffer is wrapped in a mermaid code fence
 - **Other files**: The mermaid block under the cursor is extracted (via Tree-sitter or regex fallback) and wrapped in a code fence
-- **SSE** (Server-Sent Events) from `live-server.nvim` push updates instantly (no polling)
+- **SSE** (Server-Sent Events) from `kitehost.nvim` push updates instantly (no polling)
 - **morphdom** diffs the DOM efficiently, preserving scroll position and interactive state
-- **Takeover mode** shares a single workspace (`~/.cache/nvim/markdown-preview/shared/`) and browser tab across all Neovim instances via a lock file
-- **Multi mode** uses per-buffer workspaces under `~/.cache/nvim/markdown-preview/<hash>/` with independent servers
+- **Takeover mode** shares a single workspace (`~/.cache/nvim/mdkite/shared/`) and browser tab across all Neovim instances via a lock file
+- **Multi mode** uses per-buffer workspaces under `~/.cache/nvim/mdkite/<hash>/` with independent servers
 
 ---
 
 ## Dependencies
 
 - **Neovim** 0.10+ (every release needed it; from this one the plugin says so at load instead of failing at first use)
-- **[live-server.nvim](https://github.com/selimacerbas/live-server.nvim)**: pure Lua HTTP server (no npm)
+- **[kitehost.nvim](https://github.com/selimacerbas/kitehost.nvim)** v2.0.0 or newer: pure Lua HTTP server (no npm); the plugin names it in one error at start when it is missing or older
 - **Tree-sitter** with the **Markdown** parser (recommended for mermaid block extraction)
 - **[mermaid-rs-renderer](https://github.com/1jehuang/mermaid-rs-renderer)** (optional): `cargo install mermaid-rs-renderer` for ~400x faster mermaid rendering. Set `mermaid_renderer = "rust"` in config to enable.
 
@@ -273,7 +302,7 @@ Browser-side libraries are loaded from CDN (cached by your browser):
 
 - **Local by default.** The preview server binds to `127.0.0.1`. A per-session 128-bit token gates five surfaces: your buffer content (`content.md`), the `asset_root` sidecar, the SSE stream, the event-injection endpoint and the asset route; with any `host` but `127.0.0.1` and `localhost`, the preview page itself requires it too (see *Remote access* above). [SECURITY.md](SECURITY.md) says what the token keeps out on each bind.
 - **Raw HTML is rendered by default** (GitHub-like). HTML embedded in markdown runs inside the preview page. With `allow_raw_html = false` the preview is meant to render embedded HTML as text, and that switch is being hardened, so a file you do not trust is previewed at your own risk today.
-- **Browser libraries load from CDNs** (jsdelivr/unpkg, see *Dependencies*). Rendering requires internet access, and a compromised script served from a CDN would run in the page that holds the token (see [SECURITY.md](SECURITY.md)). Vendoring the assets locally is planned ([#27](https://github.com/selimacerbas/markdown-preview.nvim/issues/27)).
+- **Browser libraries load from CDNs** (jsdelivr/unpkg, see *Dependencies*). Rendering requires internet access, and a compromised script served from a CDN would run in the page that holds the token (see [SECURITY.md](SECURITY.md)). Vendoring the assets locally is planned ([#27](https://github.com/selimacerbas/mdkite.nvim/issues/27)).
 - **`custom_css` files are inlined into the preview page** verbatim. Point it only at files you trust.
 - **Relative images are served from the previewed file's directory.** The token-gated asset route can serve *any* file at or below that directory (not just images). A previewed file's raw HTML runs in a page that holds the token, so on any bind it can read every file under the source file's directory through the asset route (`.env`, `secrets.txt`, …); on any `host` but `127.0.0.1` and `localhost` anyone holding the tokenized URL can too. Keep sensitive files out of the directory tree you preview from, and prefer an SSH tunnel to a network bind.
 - The takeover-mode lock file (which contains the session token) is written with mode `0600`.
@@ -293,7 +322,7 @@ Browser-side libraries are loaded from CDN (cached by your browser):
 - Absolute filesystem paths (`/home/me/pic.png`) are not supported; http(s) URLs load as usual.
 
 **Browser shows nothing or "Loading..."**
-- Make sure `live-server.nvim` is installed and loadable: `:lua require("live_server")`
+- Make sure `kitehost.nvim` v2.0.0 or newer is installed and loadable: `:lua require("kitehost")`
 - Check the port isn't in use: change `port` in config
 
 **Mermaid diagram not rendering**
@@ -305,16 +334,17 @@ Browser-side libraries are loaded from CDN (cached by your browser):
 - In multi mode, ports are auto-assigned. Conflicts shouldn't happen
 
 **Stale lock file (takeover mode)**
-- If Neovim crashes, the lock file may persist. The next `:MarkdownPreview` detects the dead server and automatically takes over
+- If Neovim crashes, the lock file may persist. The next `:MdKite` detects the dead server and automatically takes over
 
 ---
 
 ## Project structure
 
 ```
-markdown-preview.nvim/
-├─ plugin/markdown-preview.lua       -- commands
-├─ lua/markdown_preview/
+mdkite.nvim/
+├─ plugin/mdkite.lua                 -- :MdKite, and through 2.x the commands before it
+├─ lua/markdown_preview.lua          -- the module's name before 2.0.0, through 2.x
+├─ lua/mdkite/
 │  ├─ init.lua                       -- main logic (server, refresh, workspace, instance modes)
 │  ├─ floor.lua                      -- the Neovim requirement and its message
 │  ├─ util.lua                       -- fs helpers, workspace resolution
@@ -323,7 +353,7 @@ markdown-preview.nvim/
 │  └─ remote.lua                     -- HTTP event injection (secondary scroll sync)
 ├─ assets/
 │  └─ index.html                     -- browser preview app
-├─ lazy.lua                          -- the spec lazy.nvim reads: live-server.nvim as a dependency
+├─ lazy.lua                          -- the spec lazy.nvim reads: kitehost.nvim as a dependency
 └─ tests/                            -- the headless suites, their harness and runner, and browser/ (the browser smoke test)
 ```
 
