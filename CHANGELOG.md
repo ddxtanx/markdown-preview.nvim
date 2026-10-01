@@ -14,7 +14,7 @@ The plugin is mdkite.nvim from this release, and the server it runs on is kiteho
 | Server dependency | `selimacerbas/live-server.nvim` | `selimacerbas/kitehost.nvim`, v2.0.0 or newer |
 | Module | `require("markdown_preview")` | `require("mdkite")` |
 | Commands | `:MarkdownPreview`, `:MarkdownPreviewRefresh`, `:MarkdownPreviewStop` | `:MdKite` with `start`, `refresh` and `stop`, one for each former command in that order, and the new `toggle`, completed by `<Tab>`, none taking an argument; a bare `:MdKite` runs `start` |
-| Notices | `Markdown Preview: ...` | `mdkite: ...` on every notice this plugin makes (the server's own start `kitehost:`), but a deprecation warning, which is Neovim's own text (`:MarkdownPreview is deprecated, use :MdKite start instead.`) |
+| Notices | `Markdown Preview: ...` | `mdkite: ...` on every notice this plugin makes (the server's own notices begin `kitehost:`), but a deprecation warning, which is Neovim's own text (`:MarkdownPreview is deprecated, use :MdKite start instead.`) |
 | Cache directory | `stdpath("cache")/markdown-preview` | `stdpath("cache")/mdkite` |
 | Opt-out global | `vim.g.loaded_markdown_preview` | `vim.g.loaded_mdkite`; the former one still opts out |
 | Auto-refresh augroup | `MarkdownPreviewAuto` | `MdKiteAuto` |
