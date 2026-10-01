@@ -18,8 +18,8 @@ let outLog = "";
 let errLog = "";
 let sock = "";
 let env: Record<string, string | undefined> = {};
-let liveServer = "";
-let liveServerEntry = "";
+let kitehost = "";
+let kitehostEntry = "";
 let nvim: ReturnType<typeof Bun.spawn> | undefined;
 let browser: Browser | undefined;
 let page: Page | undefined;
@@ -34,23 +34,32 @@ const isDir = (p: string) => existsSync(p) && statSync(p).isDirectory();
 const readText = (p: string) => (p && existsSync(p) ? readFileSync(p, "utf8") : "");
 
 // The lookup tests/helpers.lua's H.rtp makes, so the suites and this test
-// load the same live-server: an empty LIVE_SERVER_RTP reads as unset, a
-// relative one resolves against the repository root (tests/run.sh runs the
-// suites from there, make test-browser runs this from tests/browser), and
-// the name found goes on the runtimepath as it is, so a link to a directory
-// whose real name the runtimepath would split still loads. The real name is
-// what the origin proof compares.
-function findLiveServer(): { entry: string; real: string } {
-  const override = process.env.LIVE_SERVER_RTP;
+// load the same kitehost: KITEHOST_RTP, else LIVE_SERVER_RTP, its name
+// before 2.0.0, through 2.x (an empty one reads as unset), a relative one
+// resolved against the repository root (tests/run.sh runs the suites from
+// there, make test-browser runs this from tests/browser); then
+// ./kitehost-rtp and the sibling clone by its name, then by its name before
+// 2.0.0. The name found goes on the runtimepath as it is, so a link to a
+// directory whose real name the runtimepath would split still loads. The
+// real name is what the origin proof compares.
+function findKitehost(): { entry: string; real: string } {
   const candidates: string[] = [];
-  if (override) {
-    const named = resolve(root, override);
-    if (!isDir(named)) throw new Error(`LIVE_SERVER_RTP is set but is not a directory: ${override}`);
-    candidates.push(named);
+  for (const variable of ["KITEHOST_RTP", "LIVE_SERVER_RTP"]) {
+    const override = process.env[variable];
+    if (override) {
+      const named = resolve(root, override);
+      if (!isDir(named)) throw new Error(`${variable} is set but is not a directory: ${override}`);
+      candidates.push(named);
+      break;
+    }
   }
-  candidates.push(join(root, "live-server-rtp"), join(dirname(root), "live-server.nvim"));
+  candidates.push(
+    join(root, "kitehost-rtp"),
+    join(dirname(root), "kitehost.nvim"),
+    join(dirname(root), "live-server.nvim"),
+  );
   const found = candidates.find(isDir);
-  if (!found) throw new Error(`live-server.nvim not found: set LIVE_SERVER_RTP or clone it to ${candidates.join(" or ")}`);
+  if (!found) throw new Error(`kitehost.nvim not found: set KITEHOST_RTP or clone it to ${candidates.join(" or ")}`);
   return { entry: found, real: realpathSync(found) };
 }
 
@@ -125,12 +134,12 @@ async function waitForUrl(ms: number): Promise<string> {
 // earlier runtimepath entry cannot stand in for the one under test.
 async function proveOrigin() {
   const sources = await remoteExpr(
-    `luaeval("debug.getinfo(require('mdkite').setup, 'S').source .. string.char(10) .. debug.getinfo(require('live_server.server').start, 'S').source")`,
+    `luaeval("debug.getinfo(require('mdkite').setup, 'S').source .. string.char(10) .. debug.getinfo(require('kitehost.server').start, 'S').source")`,
   );
   const [own, dep] = sources.split("\n").map((s) => realpathSync(s.replace(/^@/, "")));
   for (const [name, file, dir] of [
     ["mdkite", own, root],
-    ["live_server.server", dep, liveServer],
+    ["kitehost.server", dep, kitehost],
   ]) {
     if (!file.startsWith(dir + sep + "lua" + sep)) throw new Error(`${name} loaded from ${file}, outside ${dir}`);
   }
@@ -169,8 +178,8 @@ async function openPage() {
 }
 
 beforeAll(async () => {
-  ({ entry: liveServerEntry, real: liveServer } = findLiveServer());
-  console.log(`live-server.nvim: ${liveServer}`);
+  ({ entry: kitehostEntry, real: kitehost } = findKitehost());
+  console.log(`kitehost.nvim: ${kitehost}`);
   work = mkdtempSync(join(tmpdir(), "mp-smoke-"));
   const md = join(work, "doc.md");
   sock = join(work, "nvim.sock");
@@ -191,7 +200,7 @@ beforeAll(async () => {
   nvim = Bun.spawn(
     [
       "nvim", "--headless", "-u", "NONE", "--listen", sock,
-      "-c", `lua vim.opt.rtp:prepend(${lua(liveServerEntry)}) vim.opt.rtp:prepend(${lua(root)})`,
+      "-c", `lua vim.opt.rtp:prepend(${lua(kitehostEntry)}) vim.opt.rtp:prepend(${lua(root)})`,
       "-c", `lua vim.cmd.edit(vim.fn.fnameescape(${lua(md)})) vim.bo.filetype = 'markdown'`,
       "-c", setup, "-c", "lua require('mdkite').start()",
     ],

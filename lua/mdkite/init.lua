@@ -29,8 +29,25 @@ end
 
 local ts = require("mdkite.ts")
 local util = require("mdkite.util")
-local ls_server = require("live_server.server")
-local ls_util = require("live_server.util")
+
+-- The oldest kitehost.nvim this plugin runs on. Its kitehost module is new
+-- in that release, the first under the name, so an older server's modules
+-- are not found and start refuses, naming this. tests/helpers.lua and
+-- ci.yml name the same tag; start_failure_test reds when they part.
+local KITEHOST_FLOOR = "v2.0.0"
+-- Only a missing module means an older server or none: an error the server
+-- raises while loading is its own and goes on as raised.
+local function server_module(name)
+	local found, module = pcall(require, name)
+	if found then
+		return module
+	end
+	if not tostring(module):find("module '" .. name .. "' not found", 1, true) then
+		error(module, 0)
+	end
+end
+local ls_server = server_module("kitehost.server")
+local ls_util = ls_server and require("kitehost.util")
 
 local M = {}
 
@@ -125,8 +142,8 @@ M._mmdr_available = nil -- nil = unchecked, true/false after probe
 M._last_scroll_line = nil
 M._is_primary = nil -- true/false/nil (takeover mode)
 M._takeover_port = nil -- port of primary server (secondary uses for HTTP events)
-M._token = nil -- live-server auth token (primary owns; secondaries read from lockfile)
-M._bound_host = nil -- the address the primary's server bound, as live-server reports it
+M._token = nil -- kitehost auth token (primary owns; secondaries read from lockfile)
+M._bound_host = nil -- the address the primary's server bound, as kitehost reports it
 M._lock_owned = nil -- true once this instance writes the takeover lock
 
 local function effective_port()
@@ -447,7 +464,7 @@ end
 -- Refresh logic
 ---------------------------------------------------------------------------
 
--- A push live-server refused would be refused again on every edit or
+-- A push kitehost refused would be refused again on every edit or
 -- cursor move, so each kind is told once per server.
 local push_reported = setmetatable({}, { __mode = "k" })
 local function report_push(what, pushed, err)
@@ -490,7 +507,7 @@ local function maybe_refresh(bufnr, silent)
 	write_content(dir, text, bufnr)
 	M._last_text_by_buf[bufnr] = text
 
-	-- Notify live-server of the content change for immediate SSE push
+	-- Notify kitehost of the content change for immediate SSE push
 	-- In secondary takeover mode, M._server_instance is nil: fs_watch handles reload
 	if M._server_instance then
 		report_push("reload the preview", pcall(ls_server.reload, M._server_instance, M.config.content_name))
@@ -605,7 +622,7 @@ end
 
 local rule_reported = setmetatable({}, { __mode = "k" })
 
--- A live-server without the rule reports "::" as written, which shows as its loopback too.
+-- A server without the rule reports "::" as written, which shows as its loopback too.
 local function wildcard_loopback(ip)
 	if ls_server.wildcard_loopback then
 		-- A caller may replace the rule; one that raises must not fail a started server.
@@ -618,7 +635,7 @@ local function wildcard_loopback(ip)
 		if not rule_reported[inst] then
 			rule_reported[inst] = true
 			vim.notify(
-				"mdkite: live-server's wildcard rule raised, so the URL names the address bound: " .. tostring(loopback),
+				"mdkite: kitehost's wildcard rule raised, so the URL names the address bound: " .. tostring(loopback),
 				vim.log.levels.WARN
 			)
 		end
@@ -693,8 +710,19 @@ local function abandon(inst)
 end
 
 function M.start()
+	-- The two plugins update apart, so an older server is refused before
+	-- any state is made, naming the release this one needs.
+	if not ls_server then
+		vim.notify(
+			("mdkite: requires kitehost.nvim %s or newer; install or update selimacerbas/kitehost.nvim"):format(
+				KITEHOST_FLOOR
+			),
+			vim.log.levels.ERROR
+		)
+		return
+	end
 	local bufnr = vim.api.nvim_get_current_buf()
-	-- What a retarget live-server refuses goes back to.
+	-- What a retarget kitehost refuses goes back to.
 	local served_dir = M._workspace_dir
 
 	-- Takeover talks to 127.0.0.1, which a specific-interface bind does not answer on.
@@ -799,19 +827,19 @@ function M.start()
 		M._last_text_by_buf[bufnr] = text
 	end
 
-	-- Relative image support needs the asset route in live-server. The two
+	-- Relative image support needs the asset route in kitehost. The two
 	-- plugins are versioned independently, so warn (once) if the installed
-	-- live-server predates it: images will 404 until it's updated.
+	-- kitehost predates it: images will 404 until it's updated.
 	if not (ls_server.features and ls_server.features.asset_route) and not M._warned_no_asset_route then
 		M._warned_no_asset_route = true
 		vim.notify(
-			"mdkite: relative images need a newer live-server.nvim (with the asset route).\n"
-				.. "Update live-server.nvim, or relative images will not load.",
+			"mdkite: relative images need a newer kitehost.nvim (with the asset route).\n"
+				.. "Update kitehost.nvim, or relative images will not load.",
 			vim.log.levels.WARN
 		)
 	end
 
-	-- Start live-server if not already running
+	-- Start kitehost's server if not already running
 	if not M._server_instance then
 		local port = effective_port()
 		local index_path = vim.fs.joinpath(dir, M.config.index_name)

@@ -48,7 +48,7 @@ function M.write_text(path, text)
 		path = real
 	end
 	local target = vim.uv.fs_stat(path)
-	-- Dot-named, so live-server neither serves nor watches it while it exists.
+	-- Dot-named, so kitehost neither serves nor watches it while it exists.
 	local tmp = vim.fs.joinpath(vim.fs.dirname(path), (".%s.%d.tmp"):format(vim.fs.basename(path), vim.uv.os_getpid()))
 	local function fail(err)
 		-- luv names the temporary, which a user never chose: name the target.

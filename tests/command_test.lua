@@ -9,8 +9,8 @@
 -- another Neovim's included.
 --
 -- Run: nvim --headless -u NONE -l "$PWD/tests/command_test.lua"
--- live-server.nvim is found by tests/helpers.lua ($LIVE_SERVER_RTP,
--- ./live-server-rtp, the checkout's sibling live-server.nvim).
+-- kitehost.nvim is found by tests/helpers.lua ($KITEHOST_RTP,
+-- ./kitehost-rtp, the checkout's sibling kitehost.nvim).
 
 local H = dofile(vim.fs.joinpath(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)), "helpers.lua"))
 H.isolate()

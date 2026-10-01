@@ -2,15 +2,15 @@
 -- A start that fails leaves nothing behind: no autocmd refreshing a
 -- preview that does not exist, no token, workspace pointer or takeover
 -- role kept, no on_start; the notification names the port, and the next
--- start begins clean. Section 1 stubs live-server's start to raise and
--- Section 1b the lock's write, so they hold on every live-server the
--- plugin runs on, the pinned floor included. A retarget live-server
+-- start begins clean. Section 1 stubs kitehost's start to raise and
+-- Section 1b the lock's write, so they hold on every kitehost the
+-- plugin runs on, the pinned floor included. A retarget kitehost
 -- refuses leaves the served bytes as they were, and a retarget, a reload
 -- and a scroll push it refuses are each told through the plugin's notice.
 -- Sections 6 to 9: a refused start leaves a running primary's files and
 -- lock alone, a raise after the server started stops it with one notice,
 -- a secondary's refused push is told once, and a deferred browser open
--- survives a stop. Rows that need live-server's start raise skip without
+-- survives a stop. Rows that need kitehost's start raise skip without
 -- it; takeover's host rule closes the file.
 --
 -- Run: nvim --headless -u NONE -l tests/start_failure_test.lua
@@ -19,10 +19,10 @@ local H = dofile(vim.fs.joinpath(vim.fs.dirname(debug.getinfo(1, "S").source:sub
 H.isolate()
 local ls_dir = H.rtp()
 
-local ls_server = require("live_server.server")
+local ls_server = require("kitehost.server")
 local eq, ok = H.eq, H.ok
 
--- A live-server without start_raises returned from a start on a held
+-- A server without start_raises returned from a start on a held
 -- port with a server that served nothing, so the rows that need its
 -- refusal are skipped there, one skip per row, named with its case so
 -- each reads apart. True when they were.
@@ -32,7 +32,7 @@ local function skipped_without_raise(case, rows, why)
 	end
 	why = why or "a start on a held port returns"
 	for _, row in ipairs(rows) do
-		H.skip(("%s: %s (this live-server lacks features.start_raises: %s)"):format(case, row, why))
+		H.skip(("%s: %s (this server lacks features.start_raises: %s)"):format(case, row, why))
 	end
 	return true
 end
@@ -78,7 +78,7 @@ local function armed_on(bufnr)
 	return n
 end
 
--- mp.start() with live-server's start raising msg; the notifications made.
+-- mp.start() with kitehost's start raising msg; the notifications made.
 local function start_raising(msg)
 	local notes = {}
 	local real_start, real_notify = ls_server.start, vim.notify
@@ -367,15 +367,15 @@ H.case("Section 1c6: a host spelled like the error name keeps the generic notice
 	mp.start()
 	H.defer(mp.stop)
 	eq(#notes, 1, "one notice for the failed start")
-	-- live-server owns the refusal's wording and may change it, so the rows
+	-- kitehost owns the refusal's wording and may change it, so the rows
 	-- pin the notice's shape: the generic prefix, the host echoed back in the
-	-- double quotes live-server puts around a refused value, and no port-in-use
+	-- double quotes kitehost puts around a refused value, and no port-in-use
 	-- hint from this plugin. The host carries the colon so a detection keyed on
 	-- the error name with its colon is caught too.
 	if
 		not skipped_without_raise("1c6", {
 			"the notice is the generic one",
-			"the notice carries the host live-server refused",
+			"the notice carries the host kitehost refused",
 			"the notice carries no port-in-use hint",
 		})
 	then
@@ -384,7 +384,7 @@ H.case("Section 1c6: a host spelled like the error name keeps the generic notice
 			vim.startswith(msg, "mdkite: failed to start server (port 18421): "),
 			"the notice is the generic one: " .. msg
 		)
-		ok(msg:find('"EADDRINUSE:"', 1, true) ~= nil, "the notice carries the host live-server refused: " .. msg)
+		ok(msg:find('"EADDRINUSE:"', 1, true) ~= nil, "the notice carries the host kitehost refused: " .. msg)
 		ok(msg:find("is in use by another program", 1, true) == nil, "the notice carries no port-in-use hint: " .. msg)
 	end
 	eq(mp._server_instance, nil, "no server instance is kept")
@@ -476,7 +476,7 @@ ok(vim.uv.fs_stat(vim.fs.joinpath(second_ws, "index.html")), "an accepted retarg
 mp.stop()
 calls.start, calls.stop = 0, 0
 
-H.case("Section 3: a retarget live-server refuses keeps the preview where it was", function()
+H.case("Section 3: a retarget kitehost refuses keeps the preview where it was", function()
 	vim.cmd("buffer " .. first_buf)
 	mp.start()
 	H.defer(mp.stop)
@@ -522,7 +522,7 @@ H.case("Section 3b: a retarget that cannot watch says file watching is off", fun
 	ok(armed_on(second_buf) > 0, "the retargeted buffer is armed")
 end)
 
-H.case("Section 3c: a retarget whose reload live-server refuses says so", function()
+H.case("Section 3c: a retarget whose reload kitehost refuses says so", function()
 	vim.cmd("buffer " .. first_buf)
 	mp.start()
 	H.defer(mp.stop)
@@ -541,7 +541,7 @@ H.case("Section 3c: a retarget whose reload live-server refuses says so", functi
 	ok(armed_on(second_buf) > 0, "the retarget still arms the buffer")
 end)
 
-H.case("Section 3d: a takeover retarget live-server refuses leaves the served bytes", function()
+H.case("Section 3d: a takeover retarget kitehost refuses leaves the served bytes", function()
 	local other_dir = vim.fs.joinpath(tmpdir, "other")
 	vim.fn.mkdir(other_dir, "p")
 	local third = vim.fs.joinpath(other_dir, "third.md")
@@ -575,7 +575,7 @@ H.case("Section 3d: a takeover retarget live-server refuses leaves the served by
 	eq(armed_on(third_buf), 0, "the refused buffer is not armed")
 end)
 
-H.case("Section 4: a reload and a scroll push live-server refuses are told once each", function()
+H.case("Section 4: a reload and a scroll push kitehost refuses are told once each", function()
 	vim.cmd("buffer " .. first_buf)
 	mp.start()
 	H.defer(mp.stop)
@@ -779,7 +779,7 @@ end
 
 H.case("Section 7: a session token that cannot be made fails the start with one notice", function()
 	vim.cmd("buffer " .. first_buf)
-	local ls_util = require("live_server.util")
+	local ls_util = require("kitehost.util")
 	local real_token = ls_util.random_token
 	ls_util.random_token = function()
 		error("random_token: no secure random source (stubbed)", 2)
@@ -1351,7 +1351,7 @@ calls.start, calls.stop = 0, 0
 H.case("Section 15: a wildcard rule that raises leaves the URL on the address bound", function()
 	local real_start, real_rule = ls_server.start, ls_server.wildcard_loopback
 	local raising = false
-	-- live-server's own start reads the rule too; it raises once the server listens.
+	-- kitehost's own start reads the rule too; it raises once the server listens.
 	stub("start", function(...)
 		local inst = real_start(...)
 		raising = true
@@ -1496,9 +1496,9 @@ H.case("Section 16: a write's temporary file is never served", function()
 		ok(not frames:find(".tmp", 1, true), rows[3] .. ": " .. frames:gsub("\r?\n", " | "))
 	end
 	-- Without the dot rule the plugin's own gate refuses it; with the rule, 404 comes first.
-	local gated = "it answers 401 without the token on a live-server without the dot rule"
+	local gated = "it answers 401 without the token on a server without the dot rule"
 	if ls_server.features and ls_server.features.start_raises then
-		H.skip("16: " .. gated .. " (this live-server's dot rule answers 404 first)")
+		H.skip("16: " .. gated .. " (this server's dot rule answers 404 first)")
 	else
 		eq(H.http_get(("http://127.0.0.1:%d/%s"):format(port, name)).status, 401, gated)
 	end
@@ -1506,9 +1506,9 @@ end)
 calls.start, calls.stop = 0, 0
 
 H.case("Section 16b: a temporary in a subfolder sits behind the token gate", function()
-	local row = "a subfolder's temporary answers 401 without the token on a live-server without the dot rule"
+	local row = "a subfolder's temporary answers 401 without the token on a server without the dot rule"
 	if ls_server.features and ls_server.features.start_raises then
-		H.skip("16b: " .. row .. " (this live-server's dot rule answers 404 first)")
+		H.skip("16b: " .. row .. " (this server's dot rule answers 404 first)")
 		return
 	end
 	mp.setup({ port = free_port() })
@@ -2213,6 +2213,107 @@ H.case("Section 19m: a token carrying & or = stays one query parameter", functio
 	end
 	eq(events, 1, "the push names its own event and the token adds none: " .. table.concat(lines, " | "))
 	eq(encoded, 2, "the token goes escaped in the check and the push: " .. table.concat(lines, " | "))
+end)
+
+-- A Neovim whose runtimepath holds this checkout and, ahead of it, the
+-- server directory server_dir (nil for none), with XDG directories of its
+-- own, so no start package and no earlier cache answer for it. It requires
+-- the plugin and, when that loads, starts a preview of a Markdown buffer;
+-- returns what it reports.
+local function child_without_kitehost(server_dir)
+	local own = H.tmpdir()
+	local script = vim.fs.joinpath(own, "child.lua")
+	local doc = vim.fs.joinpath(own, "doc.md")
+	H.write_file(doc, "# doc\n")
+	H.write_file(
+		script,
+		([=[
+local server_dir = %s
+if server_dir then
+	vim.opt.runtimepath:prepend(server_dir)
+end
+vim.opt.runtimepath:prepend(%q)
+local notes = {}
+vim.notify = function(msg, level)
+	table.insert(notes, { msg = msg, level = level })
+end
+local report = { kitehost = #vim.api.nvim_get_runtime_file("lua/kitehost/server.lua", true), notes = notes }
+local loaded, mdkite = pcall(require, "mdkite")
+report.loaded = loaded
+if not loaded then
+	report.err = tostring(mdkite)
+else
+	mdkite.setup({ open_browser = false })
+	vim.cmd("edit " .. vim.fn.fnameescape(%q))
+	vim.bo.filetype = "markdown"
+	local started, err = pcall(mdkite.start)
+	report.raised = not started and tostring(err) or ""
+	report.state = vim.inspect({ mdkite._server_instance, mdkite._token, mdkite._workspace_dir, mdkite._is_primary })
+	local listed, autocmds = pcall(vim.api.nvim_get_autocmds, { group = "MdKiteAuto" })
+	report.autocmds = listed and #autocmds or 0
+	report.cache = vim.fn.isdirectory(vim.fs.joinpath(vim.fn.stdpath("cache"), "mdkite"))
+	report.older_loaded = package.loaded["live_server.server"] ~= nil or package.loaded["live_server.util"] ~= nil
+end
+io.stdout:write(vim.json.encode(report) .. "\n")
+]=]):format(server_dir and ("%q"):format(server_dir) or "nil", H.root, doc)
+	)
+	local env = {}
+	for _, kind in ipairs({ "CONFIG", "DATA", "STATE", "CACHE" }) do
+		env["XDG_" .. kind .. "_HOME"] = vim.fs.joinpath(own, kind:lower())
+	end
+	local r = vim.system({ vim.v.progpath, "--headless", "-u", "NONE", "-l", script }, { env = env, timeout = 30000 })
+		:wait()
+	local line = (r.stdout or ""):match("({.*})")
+	local decoded, report = pcall(vim.json.decode, line or "")
+	if not decoded or type(report) ~= "table" then
+		error(("the child reported nothing (exit %d): %s%s"):format(H.exit_code(r), r.stdout or "", r.stderr or ""), 0)
+	end
+	return report
+end
+
+-- A kitehost older than the floor has no kitehost module (the floor is the
+-- first release under the name), and neither has a runtimepath without one.
+local REFUSAL = ("mdkite: requires kitehost.nvim %s or newer; install or update selimacerbas/kitehost.nvim"):format(
+	H.kitehost_floor
+)
+local older = H.tmpdir()
+vim.fn.mkdir(older .. "/lua/live_server", "p")
+for _, name in ipairs({ "server", "util" }) do
+	H.write_file(older .. "/lua/live_server/" .. name .. ".lua", "return { features = {}, start = function() end }\n")
+end
+for _, shape in ipairs({
+	{ what = "only the server's name before 2.0.0", dir = older },
+	{ what = "no server at all" },
+}) do
+	H.case("Section 20: a runtimepath with " .. shape.what .. " is refused with one notice", function()
+		local report = child_without_kitehost(shape.dir)
+		eq(report.kitehost, 0, "the child's runtimepath has no kitehost")
+		eq(report.loaded, true, "the plugin loads: " .. tostring(report.err))
+		eq(report.raised, "", "the start raises nothing")
+		eq(#report.notes, 1, "one notice: " .. vim.inspect(report.notes))
+		eq(report.notes[1] and report.notes[1].level, vim.log.levels.ERROR, "an error")
+		eq(report.notes[1] and report.notes[1].msg, REFUSAL, "naming kitehost and its floor, " .. H.kitehost_floor)
+		eq(report.state, "{}", "no server, token, workspace or role is kept")
+		eq(report.autocmds, 0, "no autocmd is armed")
+		eq(report.cache, 0, "nothing is written under the cache")
+		eq(report.older_loaded, false, "no module of the older server is loaded")
+	end)
+end
+
+-- Only a missing module reads as an older server: a kitehost that raises
+-- while loading raises its own error.
+H.case("Section 20b: a kitehost that raises while loading is not read as an older one", function()
+	local broken = H.tmpdir()
+	vim.fn.mkdir(broken .. "/lua/kitehost", "p")
+	H.write_file(broken .. "/lua/kitehost/server.lua", 'error("KITEHOST BROKEN AT LOAD")\n')
+	H.write_file(broken .. "/lua/kitehost/util.lua", "return {}\n")
+	local report = child_without_kitehost(broken)
+	eq(report.loaded, false, "the plugin's require raises")
+	ok(
+		tostring(report.err):find("KITEHOST BROKEN AT LOAD", 1, true) ~= nil,
+		"with the server's own error: " .. tostring(report.err)
+	)
+	eq(#report.notes, 0, "and no notice names a missing kitehost")
 end)
 
 H.finish()

@@ -7,18 +7,21 @@
 #
 # The plugin file is sourced as Neovim's own loading sources it (:runtime),
 # and the check then reads what the user meets: the floor text once in
-# :messages and no traceback, every command the README's table documents
-# defined and answering a use with the text again, setup() returning, a
-# stub field answering an empty string, each submodule that requires the
-# floor module raising its text on every require (the README promises it
-# to a plugin that loads one), and no module but the entry and floor
-# modules loaded, live-server's included. A checkout that is not
-# live-server finds it as the suites do (LIVE_SERVER_RTP, then
-# ./live-server-rtp, then ../live-server.nvim; a set value that is not a
-# directory, or none found, fails), since a plugin that loads live-server
-# below the floor passes where live-server is not on the runtimepath. The
-# XDG directories point at a private directory, as tests/run.sh does, so a
-# start package cannot answer for the checkout.
+# :messages and no traceback, every command the README's tables document
+# defined and answering each use with the text again, bare and with each
+# subcommand its rows name, setup() returning, a stub field answering an
+# empty string, each submodule that requires the floor module raising its
+# text on every require (the README promises it to a plugin that loads
+# one), and no module but the entry and floor modules loaded, kitehost's
+# included. Through 2.x a submodule's former name, a file that hands the
+# module back, raises as the module does. A checkout that is not kitehost
+# finds it as the suites do (KITEHOST_RTP, else LIVE_SERVER_RTP, its name
+# before 2.0.0; then ./kitehost-rtp, ../kitehost.nvim and
+# ../live-server.nvim; a set value that is not a directory, or none found,
+# fails), since a plugin that loads kitehost below the floor would get
+# through where kitehost is not on the runtimepath. The XDG directories
+# point at a private directory, as tests/run.sh does, so a start package
+# cannot answer for the checkout.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 set -- plugin/*.lua
@@ -34,9 +37,12 @@ if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
 fi
 module=${1#lua/}
 module=${module%/init.lua}
-# The backticks are the README's Markdown, matched literally.
+# The backticks are the README's Markdown, matched literally. A row whose
+# second column names a subcommand gives "Name sub", any other row "Name";
+# the entries are comma-separated, since one holds a space.
 # shellcheck disable=SC2016
-commands=$(sed -n 's/^| `:\([A-Za-z0-9_]*\)`.*/\1/p' README.md | tr '\n' ' ')
+commands=$(sed -n -e 's/^| `:\([A-Za-z0-9_]*\)` | `\([a-z][a-z-]*\)`.*/\1 \2/p' -e t \
+    -e 's/^| `:\([A-Za-z0-9_]*\)`.*/\1/p' README.md | tr '\n' ',')
 if [ -z "$commands" ]; then
     echo "floor_smoke: README.md's command table lists no command" >&2
     exit 1
@@ -52,25 +58,52 @@ for f in lua/"$module"/*.lua; do
         guarded="$guarded $module.$name"
     fi
 done
+# A file under another lua/ directory that requires a guarded module is
+# that module's former name (lua/live_server/server.lua through 2.x).
+for f in lua/*/*.lua; do
+    [ -f "$f" ] || continue
+    case $f in lua/"$module"/*) continue ;; esac
+    dir=${f#lua/}
+    dir=${dir%%/*}
+    name=${f##*/}
+    name=${name%.lua}
+    for g in $guarded; do
+        if grep -qF "require(\"$g\")" "$f"; then
+            guarded="$guarded $dir.$name"
+            break
+        fi
+    done
+done
 rtp=$PWD
-if [ ! -d lua/live_server ]; then
+if [ ! -d lua/kitehost ]; then
     dep=
-    if [ -n "${LIVE_SERVER_RTP:-}" ]; then
-        if [ ! -d "$LIVE_SERVER_RTP" ]; then
-            echo "floor_smoke: LIVE_SERVER_RTP is set but is not a directory: $LIVE_SERVER_RTP" >&2
+    # KITEHOST_RTP first; LIVE_SERVER_RTP, its name before 2.0.0, through
+    # 2.x when it is unset.
+    var=
+    if [ -n "${KITEHOST_RTP:-}" ]; then
+        var=KITEHOST_RTP
+        dep=$KITEHOST_RTP
+    elif [ -n "${LIVE_SERVER_RTP:-}" ]; then
+        var=LIVE_SERVER_RTP
+        dep=$LIVE_SERVER_RTP
+    fi
+    if [ -n "$var" ]; then
+        if [ ! -d "$dep" ]; then
+            echo "floor_smoke: $var is set but is not a directory: $dep" >&2
             exit 1
         fi
-        dep=$LIVE_SERVER_RTP
-    elif [ -d live-server-rtp ]; then
-        dep=live-server-rtp
+    elif [ -d kitehost-rtp ]; then
+        dep=kitehost-rtp
+    elif [ -d ../kitehost.nvim ]; then
+        dep=../kitehost.nvim
     elif [ -d ../live-server.nvim ]; then
         dep=../live-server.nvim
     else
-        echo "floor_smoke: live-server.nvim not found: set LIVE_SERVER_RTP, or clone it to ./live-server-rtp or ../live-server.nvim" >&2
+        echo "floor_smoke: kitehost.nvim not found: set KITEHOST_RTP, or clone it to ./kitehost-rtp or ../kitehost.nvim" >&2
         exit 1
     fi
     case $dep in /*) ;; *) dep=$PWD/$dep ;; esac
-    echo "live-server.nvim: $dep"
+    echo "kitehost.nvim: $dep"
     rtp="$rtp,$dep"
 fi
 run=$(mktemp -d) || exit 1
@@ -119,16 +152,25 @@ if not (found and type(floor) == "table" and floor.ok == false) then
 end
 turn_loop()
 check(shown() == 1, "loading the plugin shows the floor text once (" .. shown() .. ")")
-local names = {}
-for name in os.getenv("SMOKE_COMMANDS"):gmatch("%S+") do
-    names[#names + 1] = name
-    check(vim.fn.exists(":" .. name) == 2, ":" .. name .. " is defined")
+-- Each command is used bare once and once with each subcommand its rows
+-- name, so a refuser that takes no argument raises on a subcommand.
+local uses, seen = {}, {}
+for entry in os.getenv("SMOKE_COMMANDS"):gmatch("[^,]+") do
+    local name = entry:match("^%S+")
+    if not seen[name] then
+        seen[name] = true
+        uses[#uses + 1] = name
+        check(vim.fn.exists(":" .. name) == 2, ":" .. name .. " is defined")
+    end
+    if entry ~= name then
+        uses[#uses + 1] = entry
+    end
 end
-for i, name in ipairs(names) do
-    local ran, err = pcall(vim.cmd, name)
-    check(ran, ":" .. name .. " runs without raising" .. (ran and "" or (": " .. tostring(err))))
+for i, use in ipairs(uses) do
+    local ran, err = pcall(vim.cmd, use)
+    check(ran, ":" .. use .. " runs without raising" .. (ran and "" or (": " .. tostring(err))))
     turn_loop()
-    check(shown() == i + 1, "a use of :" .. name .. " shows the floor text again (" .. shown() .. ")")
+    check(shown() == i + 1, "a use of :" .. use .. " shows the floor text again (" .. shown() .. ")")
 end
 local set_up, set_err = pcall(function()
     return require(module).setup({})
@@ -149,17 +191,22 @@ for name in os.getenv("SMOKE_GUARDED"):gmatch("%S+") do
     end
 end
 turn_loop()
+-- This plugin's modules and the server's, each by its name and, through
+-- 2.x, its former one.
+local prefixes = { module, "kitehost", "live_server", "mdkite", "markdown_preview" }
 local loaded = {}
 for name in pairs(package.loaded) do
-    local ours = name == module or name:sub(1, #module + 1) == module .. "."
-    local ls = name == "live_server" or name:sub(1, 12) == "live_server."
-    if (ours or ls) and name ~= module and name ~= module .. ".floor" then
+    local watched = false
+    for _, prefix in ipairs(prefixes) do
+        watched = watched or name == prefix or name:sub(1, #prefix + 1) == prefix .. "."
+    end
+    if watched and name ~= module and name ~= module .. ".floor" then
         loaded[#loaded + 1] = name
     end
 end
 check(#loaded == 0, "no module past the entry and the floor module loaded: " .. table.concat(loaded, ", "))
 local count, log = shown()
-check(count == #names + 1, "setup() adds no further notification (" .. count .. ")")
+check(count == #uses + 1, "setup() adds no further notification (" .. count .. ")")
 check(not log:find("traceback", 1, true), "no traceback in :messages")
 io.stdout:write("floor smoke: " .. (fails == 0 and "pass" or (fails .. " failed")) .. "\n")
 io.stdout:flush()

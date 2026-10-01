@@ -13,16 +13,18 @@ on:
 permissions:
   contents: read
 
-# The live-server floor the gating jobs and the windows job run against: the
-# tag the v1.10.0 release notes promise and the commit it named when pinned.
-# The tag is lightweight and could move, so the local action
-# .github/actions/live-server-floor checks out the commit, checks that the
-# tag still names it and that tests/helpers.lua's H.live_server_floor names
-# the same tag; the floor moves by editing these two lines and that one
-# together. live-server main is the upstream job's to report.
+# The kitehost floor the gating jobs and the windows job run against: the
+# first release under that name, whose kitehost module this plugin
+# requires, and the commit it named when pinned. A tag can be moved, so the
+# local action .github/actions/kitehost-floor checks out the commit, checks
+# that the tag still names it and that tests/helpers.lua's H.kitehost_floor
+# names the same tag; the floor moves by editing these two lines, that one
+# and KITEHOST_FLOOR in lua/mdkite/init.lua together (start_failure_test
+# reds when the last two part). kitehost main is the upstream job's to
+# report.
 env:
-  LIVE_SERVER_FLOOR: v1.5.0
-  LIVE_SERVER_FLOOR_SHA: f98bae79fd30274524412f7514549d84391d6bb2
+  KITEHOST_FLOOR: v2.0.0
+  KITEHOST_FLOOR_SHA: TO-BE-SET-AT-TAG
   # The one bun pin, for the format and browser jobs.
   BUN_VERSION: 1.4.2
 
@@ -36,7 +38,7 @@ concurrency:
 
 jobs:
   test:
-    name: test (${{ matrix.os }}, nvim ${{ matrix.nvim }}, live-server floor)
+    name: test (${{ matrix.os }}, nvim ${{ matrix.nvim }}, kitehost floor)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -48,12 +50,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # tests/helpers.lua looks for live-server.nvim at ./live-server-rtp.
+      # tests/helpers.lua looks for kitehost.nvim at ./kitehost-rtp.
       # A local action runs from the commit under test, so it takes no SHA pin.
-      - uses: ./.github/actions/live-server-floor
+      - uses: ./.github/actions/kitehost-floor
         with:
-          tag: ${{ env.LIVE_SERVER_FLOOR }}
-          sha: ${{ env.LIVE_SERVER_FLOOR_SHA }}
+          tag: ${{ env.KITEHOST_FLOOR }}
+          sha: ${{ env.KITEHOST_FLOOR_SHA }}
       - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
@@ -84,19 +86,19 @@ jobs:
   # The floor this plugin requires (the README states it from the floor
   # commit on): the first 0.10 release, not its last patch.
   floor:
-    name: floor (ubuntu-latest, nvim v0.10.0, live-server floor)
+    name: floor (ubuntu-latest, nvim v0.10.0, kitehost floor)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # tests/helpers.lua looks for live-server.nvim at ./live-server-rtp.
-      # Neovim 0.10.0 against the live-server floor is the minimal install.
-      - uses: ./.github/actions/live-server-floor
+      # tests/helpers.lua looks for kitehost.nvim at ./kitehost-rtp.
+      # Neovim 0.10.0 against the kitehost floor is the minimal install.
+      - uses: ./.github/actions/kitehost-floor
         with:
-          tag: ${{ env.LIVE_SERVER_FLOOR }}
-          sha: ${{ env.LIVE_SERVER_FLOOR_SHA }}
+          tag: ${{ env.KITEHOST_FLOOR }}
+          sha: ${{ env.KITEHOST_FLOOR_SHA }}
       - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
@@ -118,20 +120,20 @@ jobs:
   # Below the floor on a real Neovim: the suites need 0.10, and floor_guard
   # mocks has() on a supported one, which passes a 0.10 API reached before a
   # guard (measured), so a standalone smoke runs the refusal a 0.9 user meets,
-  # with the live-server floor on the runtimepath as a user has it.
+  # with the kitehost floor on the runtimepath as a user has it.
   floor-below:
-    name: floor-below (ubuntu-latest, nvim v0.9.5, live-server floor)
+    name: floor-below (ubuntu-latest, nvim v0.9.5, kitehost floor)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # tests/floor_smoke.sh puts ./live-server-rtp on the runtimepath.
-      - uses: ./.github/actions/live-server-floor
+      # tests/floor_smoke.sh puts ./kitehost-rtp on the runtimepath.
+      - uses: ./.github/actions/kitehost-floor
         with:
-          tag: ${{ env.LIVE_SERVER_FLOOR }}
-          sha: ${{ env.LIVE_SERVER_FLOOR_SHA }}
+          tag: ${{ env.KITEHOST_FLOOR }}
+          sha: ${{ env.KITEHOST_FLOOR_SHA }}
       - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
@@ -141,10 +143,10 @@ jobs:
       - name: Below-floor smoke
         run: sh tests/floor_smoke.sh
 
-  # A live-server main change that is not this repo's regression must not red
+  # A kitehost main change that is not this repo's regression must not red
   # every PR, so main is reported here, outside ci-ok, on every push and PR.
   upstream:
-    name: upstream (${{ matrix.os }}, live-server main)
+    name: upstream (${{ matrix.os }}, kitehost main)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     # On push and pull_request runs the conclusion follows ci-ok; a red here
@@ -158,12 +160,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # tests/helpers.lua looks for live-server.nvim at ./live-server-rtp.
+      # tests/helpers.lua looks for kitehost.nvim at ./kitehost-rtp.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: selimacerbas/live-server.nvim
+          repository: selimacerbas/kitehost.nvim
           ref: main
-          path: live-server-rtp
+          path: kitehost-rtp
           persist-credentials: false
       - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
@@ -173,17 +175,17 @@ jobs:
         run: nvim --version | head -n 3
       - name: Headless tests
         run: sh tests/run.sh
-      # The files shared with live-server.nvim against its main, reported here
+      # The files shared with kitehost.nvim against its main, reported here
       # outside ci-ok: a drift is a copy one side still owes the other.
-      - name: Shared-file parity with live-server main
+      - name: Shared-file parity with kitehost main
         if: ${{ !cancelled() && runner.os == 'Linux' }}
-        run: sh tests/parity.sh live-server-rtp
+        run: sh tests/parity.sh kitehost-rtp
 
   # The suites on Windows, gating as the other test jobs do and on the
-  # live-server floor as they are; it joined ci-ok after three green hosted
+  # kitehost floor as they are; it joined ci-ok after three green hosted
   # runs. The token fallback (no /dev/urandom) has no assertion of its own.
   windows:
-    name: windows (nvim stable, live-server floor)
+    name: windows (nvim stable, kitehost floor)
     runs-on: windows-latest
     timeout-minutes: 15
     defaults:
@@ -193,11 +195,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # tests/helpers.lua looks for live-server.nvim at ./live-server-rtp.
-      - uses: ./.github/actions/live-server-floor
+      # tests/helpers.lua looks for kitehost.nvim at ./kitehost-rtp.
+      - uses: ./.github/actions/kitehost-floor
         with:
-          tag: ${{ env.LIVE_SERVER_FLOOR }}
-          sha: ${{ env.LIVE_SERVER_FLOOR_SHA }}
+          tag: ${{ env.KITEHOST_FLOOR }}
+          sha: ${{ env.KITEHOST_FLOOR_SHA }}
       - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
@@ -409,18 +411,18 @@ jobs:
   # headless Chromium and follows one edit over SSE. The CDN libraries the
   # page loads need network, and a failed request is named in the output.
   browser:
-    name: browser (ubuntu-latest, nvim stable, chromium, live-server floor)
+    name: browser (ubuntu-latest, nvim stable, chromium, kitehost floor)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The smoke test looks for live-server.nvim at ./live-server-rtp.
-      - uses: ./.github/actions/live-server-floor
+      # The smoke test looks for kitehost.nvim at ./kitehost-rtp.
+      - uses: ./.github/actions/kitehost-floor
         with:
-          tag: ${{ env.LIVE_SERVER_FLOOR }}
-          sha: ${{ env.LIVE_SERVER_FLOOR_SHA }}
+          tag: ${{ env.KITEHOST_FLOOR }}
+          sha: ${{ env.KITEHOST_FLOOR_SHA }}
       - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true

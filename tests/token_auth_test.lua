@@ -7,8 +7,8 @@
 -- :MdKite user command.
 --
 -- Run: nvim --headless -u NONE -l "$PWD/tests/token_auth_test.lua"
--- live-server.nvim is found by tests/helpers.lua ($LIVE_SERVER_RTP,
--- ./live-server-rtp, the checkout's sibling live-server.nvim).
+-- kitehost.nvim is found by tests/helpers.lua ($KITEHOST_RTP,
+-- ./kitehost-rtp, the checkout's sibling kitehost.nvim).
 
 local H = dofile(vim.fs.joinpath(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)), "helpers.lua"))
 -- Where the plugin would write without the helper: the cache Neovim started
@@ -257,9 +257,9 @@ H.section("Section 6: the preview URL")
 -- Every row reads the URL on_start receives: its host is the address the
 -- server bound as a browser reaches it, and the token rides along on any
 -- bind but 127.0.0.1, whose index carries it.
--- The live-server that binds localhost as 127.0.0.1 and reports the
+-- A server that binds localhost as 127.0.0.1 and reports the
 -- address canonical; start_raises arrived with them.
-local ls_features = require("live_server.server").features
+local ls_features = require("kitehost.server").features
 local newer_server = ls_features ~= nil and ls_features.start_raises == true
 -- The URL on_start receives for a start on host; "" when none came.
 local function url_for(host)
@@ -290,14 +290,14 @@ if v6 then
 		v6_url:match("^http://%[::1%]:%d+/%?t=%x+$") ~= nil,
 		"an IPv6 loopback bind yields http://[::1]:<port>/?t=<token>: " .. v6_url
 	)
-	-- The IPv6 wildcard shows its loopback, as live-server's own URL does.
+	-- The IPv6 wildcard shows its loopback, as kitehost's own URL does.
 	local any_url = url_for("::")
 	ok(
 		any_url:match("^http://%[::1%]:%d+/%?t=%x+$") ~= nil,
 		"an IPv6 wildcard bind yields http://[::1]:<port>/?t=<token>: " .. any_url
 	)
 	-- Any spelling of the wildcard is bound as "::", so it opens [::1] too;
-	-- a live-server without start_raises reported the spelling it was given.
+	-- a server without start_raises reported the spelling it was given.
 	if newer_server then
 		local long_url = url_for("0:0:0:0:0:0:0:0")
 		ok(
@@ -307,7 +307,7 @@ if v6 then
 	else
 		H.skip(
 			"a 0:0:0:0:0:0:0:0 bind yields http://[::1]:<port>/?t=<token>"
-				.. " (this live-server lacks features.start_raises: it reports the address as written)"
+				.. " (this server lacks features.start_raises: it reports the address as written)"
 		)
 	end
 	-- The loopback set stays 127.0.0.1 and localhost, the address takeover talks to.
@@ -346,7 +346,7 @@ if newer_server then
 else
 	H.skip(
 		"a localhost bind opens 127.0.0.1 with no ?t="
-			.. " (this live-server lacks features.start_raises: it cannot bind localhost)"
+			.. " (this server lacks features.start_raises: it cannot bind localhost)"
 	)
 end
 local net_url = url_for("0.0.0.0")

@@ -2,15 +2,15 @@
 -- Below Neovim 0.10 every documented command, each of its subcommands and
 -- each command from before the rename is a refuser that answers each use
 -- with the floor module's text and the module answers a config's
--- setup() without loading the plugin or live-server (one ERROR notification
+-- setup() without loading the plugin or kitehost (one ERROR notification
 -- at load between them), unless the config opted out under either load
 -- guard; on a supported version the commands are defined. The module's name
 -- from before the rename hands back the same table, warning once a session
 -- above the floor and adding nothing below it.
 --
 -- Run: nvim --headless -u NONE -l "$PWD/tests/floor_guard_test.lua"
--- live-server.nvim is found by tests/helpers.lua ($LIVE_SERVER_RTP,
--- ./live-server-rtp, the checkout's sibling live-server.nvim).
+-- kitehost.nvim is found by tests/helpers.lua ($KITEHOST_RTP,
+-- ./kitehost-rtp, the checkout's sibling kitehost.nvim).
 local H = dofile(vim.fs.joinpath(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)), "helpers.lua"))
 H.isolate()
 H.rtp()
@@ -65,13 +65,13 @@ local function defined()
 	return table.concat(names, " ")
 end
 
--- A loaded module of this plugin or of live-server besides the entry module
+-- A loaded module of this plugin or of kitehost besides the entry module
 -- and the floor module is code that needs 0.10.
 local function loaded_below()
 	local found = {}
 	for name in pairs(package.loaded) do
 		local plugin = name == MODULE or vim.startswith(name, MODULE .. ".")
-		local ls = name == "live_server" or vim.startswith(name, "live_server.")
+		local ls = name == "kitehost" or vim.startswith(name, "kitehost.")
 		if (plugin or ls) and name ~= MODULE and name ~= MODULE .. ".floor" then
 			table.insert(found, name)
 		end
@@ -361,11 +361,11 @@ for _, name in ipairs(names) do
 	pcall(vim.api.nvim_del_user_command, name)
 end
 -- The stub and the floor module's verdict go with every other module of
--- this plugin, its name from before the rename and live-server's, and so
+-- this plugin, its name from before the rename and kitehost's, and so
 -- does the sentinel require leaves for a module that raised while loading.
 for name in pairs(package.loaded) do
 	local plugin = name == MODULE or name == ALIAS or vim.startswith(name, MODULE .. ".")
-	if plugin or name == "live_server" or vim.startswith(name, "live_server.") then
+	if plugin or name == "kitehost" or vim.startswith(name, "kitehost.") then
 		package.loaded[name] = nil
 	end
 end
@@ -399,8 +399,8 @@ H.eq(
 -- By type: a left-over stub answers config with a function.
 local module_ok, module = pcall(require, MODULE)
 H.ok(
-	module_ok and type(module.config) == "table" and type(package.loaded["live_server.server"]) == "table",
-	"the plugin's own modules and live-server's load on a supported Neovim"
+	module_ok and type(module.config) == "table" and type(package.loaded["kitehost.server"]) == "table",
+	"the plugin's own modules and kitehost's load on a supported Neovim"
 		.. (module_ok and "" or (": " .. tostring(module)))
 )
 H.eq(

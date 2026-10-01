@@ -1,5 +1,5 @@
 -- tests/asset_route_test.lua
--- The relative-image promise of v1.10.0 rides on live-server's asset route.
+-- The relative-image promise of v1.10.0 rides on kitehost's asset route.
 -- The suite passed against live-server v1.4.0, which has no such route, so
 -- the first check names the feature flag and the rest drive the route; the
 -- plugin's asset_root sidecar, which names the document's directory, stays
@@ -14,12 +14,12 @@ H.rtp()
 
 local uv = vim.uv
 
-local ls_server = require("live_server.server")
+local ls_server = require("kitehost.server")
 
-H.section("Section 1: the installed live-server is at or above the floor")
+H.section("Section 1: the installed kitehost is at or above the floor")
 H.ok(
 	type(ls_server.features) == "table" and ls_server.features.asset_route == true,
-	("live-server exports features.asset_route (%s or newer)"):format(H.live_server_floor)
+	("kitehost exports features.asset_route (%s or newer)"):format(H.kitehost_floor)
 )
 
 local dir = H.tmpdir()
@@ -47,7 +47,7 @@ H.eq(
 	"a path above the document's directory is 404"
 )
 -- Containment is by the resolved path, not the spelling: a lexical check
--- served a link like this one (measured on a live-server mutant). The
+-- served a link like this one (measured on a mutant of the server). The
 -- target is written with the platform's separator, since Windows took a /
 -- in it unconverted and the link did not resolve (measured on the hosted
 -- runner); a link that cannot be made or does not resolve proves nothing

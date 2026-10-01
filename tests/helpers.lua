@@ -274,26 +274,27 @@ local RTP_SYNTAX =
 	"a name the runtimepath reads differently (a comma, a dollar sign, a glob character, a backslash, a brace, or a name ending in after)"
 
 -- parity: own lines begin (tests/parity.sh compares the rest with the sibling)
--- The live-server floor this plugin's release notes promise, written once:
+-- The kitehost floor this plugin's release notes promise, written once:
 -- the not-found message and the suites read it here, and CI's floor step
--- checks this line against the workflow's LIVE_SERVER_FLOOR.
-H.live_server_floor = "v1.5.0"
+-- checks this line against the workflow's KITEHOST_FLOOR.
+H.kitehost_floor = "v2.0.0"
 
 -- The checkout goes first on the runtimepath, by the name the helper was
 -- loaded through, and proves it is the copy require loads.
--- live-server.nvim's copy of this file is one source with this one outside
--- these own lines, indentation aside: here H.rtp proves this
--- plugin's modules and then finds live-server as a dependency, from
--- $LIVE_SERVER_RTP, ./live-server-rtp (the CI checkout) or the checkout's
--- sibling live-server.nvim (the developer's clone); the first that exists
--- wins, goes on the runtimepath by the name it was found under, and is
--- written on a line of its own and returned canonical, so a stale
--- ./live-server-rtp shows in every run and a test compares the name by
--- value. A set override that is not a directory raises, and so does finding
--- none or a directory whose modules the search does not resolve to: falling
--- through would let require load whatever live-server the startup
--- runtimepath or packpath carries. Every raise names the suite's H.rtp()
--- line.
+-- kitehost.nvim's copy of this file is one source with this one outside
+-- these own lines, indentation aside: here H.rtp proves this plugin's
+-- modules and then finds kitehost as a dependency, from $KITEHOST_RTP
+-- (else $LIVE_SERVER_RTP, its name before 2.0.0, through 2.x),
+-- ./kitehost-rtp (the CI checkout) or the checkout's sibling
+-- kitehost.nvim, then live-server.nvim, its name before 2.0.0 (the
+-- developer's clone); the first that exists wins, goes on the runtimepath
+-- by the name it was found under, and is written on a line of its own and
+-- returned canonical, so a stale ./kitehost-rtp shows in every run and a
+-- test compares the name by value. A set override that is not a directory
+-- raises, and so does finding none or a directory whose modules the
+-- search does not resolve to: falling through would let require load
+-- whatever kitehost the startup runtimepath or packpath carries. Every
+-- raise names the suite's H.rtp() line.
 function H.rtp()
 	vim.opt.runtimepath:prepend(root_entry)
 	-- Every module the checkout ships, since a copy elsewhere can shadow any
@@ -311,6 +312,12 @@ function H.rtp()
 			table.insert(modules, "mdkite." .. base)
 		end
 	end
+	-- Through 2.x the module's name before the rename is a flat file that
+	-- hands back mdkite's table, and a copy elsewhere would answer for it
+	-- just as well; a tree without the file ships nothing under that name.
+	if uv.fs_stat(H.root .. "/lua/markdown_preview.lua") then
+		table.insert(modules, "markdown_preview")
+	end
 	-- The first refusal among this plugin's modules, or nil.
 	local function root_refusal(reason)
 		for _, modname in ipairs(modules) do
@@ -325,24 +332,32 @@ function H.rtp()
 		error(refusal, 2)
 	end
 	-- Built one by one: a nil first element would end ipairs before the
-	-- fallbacks, so an unset LIVE_SERVER_RTP would find nothing.
+	-- fallbacks, so an unset override would find nothing.
 	local candidates = {}
-	if vim.env.LIVE_SERVER_RTP and vim.env.LIVE_SERVER_RTP ~= "" then
-		local path = vim.env.LIVE_SERVER_RTP
-		if vim.fn.isdirectory(path) == 0 then
-			-- The value as set: it names the variable, not a path this run
-			-- resolved.
-			error("LIVE_SERVER_RTP is set but is not a directory: " .. path, 2)
+	-- KITEHOST_RTP, else LIVE_SERVER_RTP, its name before 2.0.0, through
+	-- 2.x; the first one set is the one read.
+	for _, var in ipairs({ "KITEHOST_RTP", "LIVE_SERVER_RTP" }) do
+		local path = vim.env[var]
+		if path and path ~= "" then
+			if vim.fn.isdirectory(path) == 0 then
+				-- The value as set: it names the variable, not a path this
+				-- run resolved.
+				error(var .. " is set but is not a directory: " .. path, 2)
+			end
+			table.insert(candidates, path)
+			break
 		end
-		table.insert(candidates, path)
 	end
-	local ci_checkout = H.root .. "/live-server-rtp"
+	local ci_checkout = H.root .. "/kitehost-rtp"
 	-- H.root is physical, so through a symlinked checkout its parent is the
 	-- link target's, the one the kernel resolves ".." to, where the link's
-	-- own parent is the one normalize would give.
-	local sibling = vim.fs.dirname(H.root) .. "/live-server.nvim"
+	-- own parent is the one normalize would give. The sibling is tried by
+	-- its name, then by its name before 2.0.0.
+	local sibling = vim.fs.dirname(H.root) .. "/kitehost.nvim"
+	local former_sibling = vim.fs.dirname(H.root) .. "/live-server.nvim"
 	table.insert(candidates, ci_checkout)
 	table.insert(candidates, sibling)
+	table.insert(candidates, former_sibling)
 	for _, found in ipairs(candidates) do
 		if vim.fn.isdirectory(found) == 1 then
 			-- The entry is the name found, absolute so a relative override
@@ -355,14 +370,14 @@ function H.rtp()
 			local dir = H.canon(found)
 			vim.opt.runtimepath:prepend(entry)
 			-- The modules the plugin loads, as the pinned floor ships them: server,
-			-- and util, which server requires. A module a newer live-server
+			-- and util, which server requires. A module a newer kitehost
 			-- requires beside them joins the list with the floor bump.
-			for _, modname in ipairs({ "live_server.server", "live_server.util" }) do
+			for _, modname in ipairs({ "kitehost.server", "kitehost.util" }) do
 				refusal = unproven(
 					dir,
 					modname,
-					"live-server.nvim",
-					"a directory without lua/live_server/server.lua and util.lua, or " .. RTP_SYNTAX
+					"kitehost.nvim",
+					"a directory without lua/kitehost/server.lua and util.lua, or " .. RTP_SYNTAX
 				)
 				if refusal then
 					error(refusal, 2)
@@ -372,18 +387,18 @@ function H.rtp()
 			-- that also carries this plugin's modules, in either file form,
 			-- answered require instead while every proof above passed
 			-- (measured): prove the root again.
-			refusal = root_refusal(("live-server.nvim at %s carries this plugin's modules too"):format(dir))
+			refusal = root_refusal(("kitehost.nvim at %s carries this plugin's modules too"):format(dir))
 			if refusal then
 				error(refusal, 2)
 			end
 			-- Its own line, straight to stdout: a parent reads it back.
-			H.write_line("live-server.nvim: " .. dir)
+			H.write_line("kitehost.nvim: " .. dir)
 			return dir
 		end
 	end
 	error(
-		("live-server.nvim not found: clone https://github.com/selimacerbas/live-server.nvim (%s or newer) to %s or %s, or set LIVE_SERVER_RTP to a checkout"):format(
-			H.live_server_floor,
+		("kitehost.nvim not found: clone https://github.com/selimacerbas/kitehost.nvim (%s or newer) to %s or %s, or set KITEHOST_RTP to a checkout"):format(
+			H.kitehost_floor,
 			ci_checkout,
 			sibling
 		),
