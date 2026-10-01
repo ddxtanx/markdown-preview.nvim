@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Markdown Preview</title>
+    <title>mdkite</title>
 
     <!-- highlight.js theme (swapped dynamically for light mode) -->
     <link id="hljs-theme" rel="stylesheet"
@@ -820,7 +820,7 @@
                     stroke-linecap="round" stroke-linejoin="round" />
             </svg>
         </span>
-        <h1>Markdown Preview</h1>
+        <h1>mdkite</h1>
         <div class="spacer"></div>
         <div id="statusDot" class="status-dot" title="Disconnected"></div>
         <span id="status" aria-live="polite"></span>
@@ -1397,7 +1397,7 @@
             window.scrollTo({ top: Math.max(0, offsetTop - window.innerHeight / 2) });
         }
 
-        // ── SSE (Server-Sent Events from live-server.nvim) ────────────
+        // ── SSE (Server-Sent Events from kitehost.nvim) ───────────────
         function connectSSE() {
             const evtSource = new EventSource(withToken('/__live/events'));
             evtSource.addEventListener('reload', async () => {

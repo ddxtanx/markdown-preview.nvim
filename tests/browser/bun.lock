@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "markdown-preview-browser-tests",
+      "name": "mdkite-browser-tests",
       "devDependencies": {
         "playwright": "1.63.0",
       },
