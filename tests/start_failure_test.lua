@@ -2391,4 +2391,62 @@ H.case("Section 21: a port another program holds, end to end in takeover mode", 
 	eq(mp._token, nil, "no token is kept")
 end)
 
+-- The kitehost module is the version check, and a capability the plugin
+-- requires is read from features: a server without one is refused too,
+-- naming it, before any state is made. The text is built from the
+-- helper's floor, so the module's constant and the helper are held
+-- together.
+local ALL_FEATURES = {
+	token_auth = true,
+	host_binding = true,
+	asset_route = true,
+	host_check = true,
+	cors_list = true,
+	start_raises = true,
+}
+for _, shape in ipairs({
+	{ what = "features.host_check", drop = "host_check", named = "host_check" },
+	{ what = "features.start_raises", drop = "start_raises", named = "start_raises" },
+	{ what = "a features table", named = "host_check" },
+}) do
+	H.case("Section 22: a kitehost without " .. shape.what .. " is refused with one notice", function()
+		local flags = nil
+		if shape.drop then
+			flags = vim.deepcopy(ALL_FEATURES)
+			flags[shape.drop] = nil
+		end
+		stub("features", flags)
+		local starts, real_start = 0, ls_server.start
+		stub("start", function(...)
+			starts = starts + 1
+			return real_start(...)
+		end)
+		mp.setup({ port = 0 })
+		H.defer(function()
+			mp.setup({ port = 18421 })
+		end)
+		vim.cmd("buffer " .. first_buf)
+		local started = calls.start
+		local notes = capture_notes()
+		mp.start()
+		H.defer(mp.stop)
+		eq(#notes, 1, "one notice")
+		eq(notes[1] and notes[1].level, vim.log.levels.ERROR, "an error")
+		eq(
+			notes[1] and notes[1].msg,
+			(
+				"mdkite: requires kitehost.nvim %s or newer, and the installed one lacks features.%s;"
+				.. " update selimacerbas/kitehost.nvim"
+			):format(H.kitehost_floor, shape.named),
+			"naming the floor, " .. H.kitehost_floor .. ", and the flag it lacks"
+		)
+		eq(starts, 0, "no server start is tried")
+		eq(mp._server_instance, nil, "no server instance is made")
+		eq(mp._token, nil, "no token is made")
+		eq(mp._workspace_dir, nil, "no workspace pointer is kept")
+		eq(armed(), 0, "no autocmd is armed")
+		eq(calls.start, started, "on_start is not called")
+	end)
+end
+
 H.finish()

@@ -27,6 +27,7 @@ Live **Markdown preview** for Neovim with first-class **Mermaid diagram** suppor
   -- a kitehost.nvim checkout under another dir name needs its spec to
   -- say name = "kitehost.nvim", or lazy.nvim clones upstream beside it
   dependencies = { "selimacerbas/kitehost.nvim" },
+  -- kitehost.nvim v2.0.0 or newer, the first release with its Host check
   config = function()
     require("mdkite").setup({
       -- all optional; sane defaults shown

@@ -35,6 +35,12 @@ local util = require("mdkite.util")
 -- are not found and start refuses, naming this. tests/helpers.lua and
 -- ci.yml name the same tag; start_failure_test reds when they part.
 local KITEHOST_FLOOR = "v2.0.0"
+-- The capabilities start requires, read from features since the two
+-- plugins update apart: the Host check keeps a DNS-rebinding page from the
+-- token the loopback index bakes, and the failure notices read a start
+-- that raises. The asset route is older than both, so a server with them
+-- has it.
+local REQUIRED_FEATURES = { "host_check", "start_raises" }
 -- Only a missing module means an older server or none: an error the server
 -- raises while loading is its own and goes on as raised.
 local function server_module(name)
@@ -721,6 +727,18 @@ function M.start()
 		)
 		return
 	end
+	for _, flag in ipairs(REQUIRED_FEATURES) do
+		if not (ls_server.features and ls_server.features[flag]) then
+			vim.notify(
+				("mdkite: requires kitehost.nvim %s or newer, and the installed one lacks features.%s; update selimacerbas/kitehost.nvim"):format(
+					KITEHOST_FLOOR,
+					flag
+				),
+				vim.log.levels.ERROR
+			)
+			return
+		end
+	end
 	local bufnr = vim.api.nvim_get_current_buf()
 	-- What a retarget kitehost refuses goes back to.
 	local served_dir = M._workspace_dir
@@ -825,18 +843,6 @@ function M.start()
 		write_index_if_needed(dir)
 		write_content(dir, text, bufnr)
 		M._last_text_by_buf[bufnr] = text
-	end
-
-	-- Relative image support needs the asset route in kitehost. The two
-	-- plugins are versioned independently, so warn (once) if the installed
-	-- kitehost predates it: images will 404 until it's updated.
-	if not (ls_server.features and ls_server.features.asset_route) and not M._warned_no_asset_route then
-		M._warned_no_asset_route = true
-		vim.notify(
-			"mdkite: relative images need a newer kitehost.nvim (with the asset route).\n"
-				.. "Update kitehost.nvim, or relative images will not load.",
-			vim.log.levels.WARN
-		)
 	end
 
 	-- Start kitehost's server if not already running

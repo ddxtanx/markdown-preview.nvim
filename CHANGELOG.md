@@ -33,6 +33,7 @@ A lazy.nvim spec that relies on `opts` or `config = true` and is named after nei
 ### Changed
 
 - **BREAKING:** The plugin runs on kitehost.nvim v2.0.0 or newer (the upgrading section above). With an older server on the runtimepath, or none, a start refuses with one error, `mdkite: requires kitehost.nvim v2.0.0 or newer; install or update selimacerbas/kitehost.nvim`, where a missing server raised a Lua error as the plugin loaded.
+- A kitehost.nvim without a capability the plugin requires, `server.features.host_check` (the Host check that keeps a DNS-rebinding page from the token the loopback page carries) or `server.features.start_raises`, is refused at start the same way, with one error naming the floor and the flag it lacks, `mdkite: requires kitehost.nvim v2.0.0 or newer, and the installed one lacks features.host_check; update selimacerbas/kitehost.nvim`, where a server without the asset route was only warned about.
 - The start-failure notification reads `mdkite: failed to start server (port <port>): <reason>`.
 - `vim.uv` replaces the deprecated `vim.loop` throughout.
 - When the port is taken by another program, the start-failure notification says so and how to pick another: `mdkite: port <port> is in use by another program. Set port to a free one in setup(), or port = 0 with instance_mode = "multi" for an OS-assigned port.` A port the OS assigns keeps the generic notification, whose reason names the port.
