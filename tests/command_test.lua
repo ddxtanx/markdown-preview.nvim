@@ -1,11 +1,12 @@
 -- tests/command_test.lua
 -- :MdKite runs the subcommand its first argument names, and start when it
 -- names none; completion offers the subcommands for that argument alone; an
--- unknown subcommand, or a second argument, is one error notice naming the
--- known ones. The commands from before the rename run their subcommand and
--- warn once a session each. Sections 5 and 6 drive toggle against a real
--- server: it starts a stopped preview and stops a running one, a preview
--- joined to another Neovim's included.
+-- unknown subcommand is one error notice naming the known ones, and an
+-- argument after a known one is one error saying it takes none. The
+-- commands from before the rename run their subcommand and warn once a
+-- session each. Sections 5 and 6 drive toggle against a real server: it
+-- starts a stopped preview and stops a running one, a preview joined to
+-- another Neovim's included.
 --
 -- Run: nvim --headless -u NONE -l "$PWD/tests/command_test.lua"
 -- live-server.nvim is found by tests/helpers.lua ($LIVE_SERVER_RTP,
@@ -55,18 +56,19 @@ H.case("Section 1: each subcommand runs its function", function()
 	eq((dispatched("MdKite")), "start", "a bare :MdKite runs start")
 end)
 
-H.case("Section 2: an unknown subcommand is one error naming the known ones", function()
-	for _, cmdline in ipairs({ "MdKite nope", "MdKite start extra" }) do
+H.case("Section 2: an unknown subcommand, or an argument after one, is one error", function()
+	for _, case in ipairs({
+		{ "MdKite nope", "mdkite: no subcommand nope; the subcommands are start, stop, refresh, toggle" },
+		{ "MdKite nope extra", "mdkite: no subcommand nope; the subcommands are start, stop, refresh, toggle" },
+		{ "MdKite start extra", "mdkite: start takes no arguments" },
+	}) do
+		local cmdline, want = case[1], case[2]
 		local called, notes = dispatched(cmdline)
 		eq(called, "", cmdline .. " runs nothing")
 		eq(#notes, 1, cmdline .. " gives one notice")
 		local note = notes[1] or {}
 		eq(note.level, vim.log.levels.ERROR, cmdline .. " gives an error")
-		ok(
-			vim.startswith(note.msg or "", "mdkite: unknown subcommand ")
-				and vim.endswith(note.msg or "", table.concat(SUBCOMMANDS, ", ")),
-			cmdline .. " names the subcommands: " .. tostring(note.msg)
-		)
+		eq(note.msg, want, cmdline .. " says what was wrong")
 	end
 end)
 

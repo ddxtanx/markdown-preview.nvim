@@ -60,14 +60,21 @@ local function complete(lead, line, pos)
 	end, SUBCOMMANDS)
 end
 
--- A bare :MdKite starts the preview.
+-- A bare :MdKite starts, so a keymap or a lazy.nvim cmd spec needs no
+-- argument, as the start command before the rename needed none.
 vim.api.nvim_create_user_command("MdKite", function(opts)
 	local sub = opts.fargs[1] or "start"
-	if #opts.fargs > 1 or not vim.tbl_contains(SUBCOMMANDS, sub) then
+	if not vim.tbl_contains(SUBCOMMANDS, sub) then
+		-- A control character typed into the name would garble the notice.
+		local typed = sub:gsub("%c", "?")
 		vim.notify(
-			("mdkite: unknown subcommand %q; the subcommands are %s"):format(opts.args, table.concat(SUBCOMMANDS, ", ")),
+			("mdkite: no subcommand %s; the subcommands are %s"):format(typed, table.concat(SUBCOMMANDS, ", ")),
 			vim.log.levels.ERROR
 		)
+		return
+	end
+	if #opts.fargs > 1 then
+		vim.notify(("mdkite: %s takes no arguments"):format(sub), vim.log.levels.ERROR)
 		return
 	end
 	require("mdkite")[sub]()
