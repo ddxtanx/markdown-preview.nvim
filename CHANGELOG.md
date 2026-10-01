@@ -55,6 +55,7 @@ A lazy.nvim spec that relies on `opts` or `config = true` and is named after nei
 - Changing `host` with `setup()` while a preview runs no longer makes the next `:MdKite start` on another buffer refuse; the new host applies to the next start.
 - A Neovim that joined another's takeover preview reports a scroll update the running preview refuses (after a restart with a new token) or cannot receive (the preview is gone) once, and again after `:MdKite start` joins anew; before, it said nothing.
 - Stopping the preview within 200 ms of starting it or switching buffers no longer raises a Lua error from the pending browser open, and no browser opens for the stopped preview.
+- On Windows, when the runtimepath lists no copy of the preview page the plugin ships, a start finds it from the plugin's own path whichever slash that path is written with; before, a path written with forward slashes failed the start with `Could not locate assets/index.html in runtimepath`.
 
 ### Security
 

@@ -136,9 +136,12 @@ function M.resolve_asset(rel)
 	if this:sub(1, 1) == "@" then
 		this = this:sub(2)
 	end
-	local root = this:match("(.-)" .. sep .. "lua" .. sep .. "mdkite" .. sep .. "util%.lua$")
+	-- The path keeps the separators of the runtimepath entry it loaded
+	-- through, a slash on Windows too where a plugin manager wrote one, so
+	-- either ends a directory; a slash join opens on every OS.
+	local root = this:match("^(.-)[/\\]lua[/\\]mdkite[/\\]util%.lua$")
 	if root then
-		local candidate = table.concat({ root, rel }, sep)
+		local candidate = vim.fs.joinpath(root, rel)
 		if M.file_exists(candidate) then
 			return candidate
 		end

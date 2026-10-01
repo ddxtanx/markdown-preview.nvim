@@ -87,4 +87,30 @@ H.ok(
 	found_ok and type(found) == "string" and H.same_path(found, H.root .. "/assets/index.html"),
 	"assets/index.html resolves from the module's own path: " .. tostring(found)
 )
+-- The module's path keeps its runtimepath entry's separators, and the
+-- hosted Windows runner spells that entry with slashes, where a cut on the
+-- platform's backslash found no root (measured); either spelling, read
+-- here on every OS, must reach the checkout. The stub answers the one
+-- getinfo call resolve_asset makes for its own source.
+local util = require("mdkite.util")
+local real_getinfo = debug.getinfo
+for _, slash in ipairs({ "/", "\\" }) do
+	local source = "@" .. H.root .. slash .. table.concat({ "lua", "mdkite", "util.lua" }, slash)
+	vim.api.nvim_get_runtime_file = function()
+		return {}
+	end
+	debug.getinfo = function(level, what)
+		if level ~= 1 or what ~= "S" then
+			error("the getinfo stub answers resolve_asset's own source read only", 2)
+		end
+		return { source = source }
+	end
+	local cut_ok, cut = pcall(util.resolve_asset, "assets/index.html")
+	debug.getinfo = real_getinfo
+	vim.api.nvim_get_runtime_file = real_runtime_file
+	H.ok(
+		cut_ok and type(cut) == "string" and H.same_path(cut, H.root .. "/assets/index.html"),
+		("a module path whose separator is %s resolves the index from its root: %s"):format(slash, tostring(cut))
+	)
+end
 H.finish()
