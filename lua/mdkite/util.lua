@@ -1,10 +1,12 @@
 -- lua/mdkite/util.lua
 local M = {}
 
-local sep = package.config:sub(1, 1)
-
+-- The folder a path names, up to its last separator, either one: on
+-- Windows vim.fs.joinpath joins with a slash, so a split on the backslash
+-- alone cut such a path short of its folder or found none, and a write
+-- never made a missing parent there.
 local function dirname(path)
-	return path:match("^(.*" .. sep .. ")") or "./"
+	return path:match("^(.*[/\\])") or "./"
 end
 
 function M.mkdirp(path)

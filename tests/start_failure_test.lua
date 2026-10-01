@@ -1593,6 +1593,35 @@ H.case("Section 17: a write keeps what its target was", function()
 end)
 calls.start, calls.stop = 0, 0
 
+-- On Windows a path vim.fs.joinpath builds ends in slashes, so a folder
+-- cut on the backslash alone was the wrong one or none, and a write made
+-- no missing parent. dirname is write_text's own local, reached as its
+-- upvalue so the module's surface stays as it is.
+H.case("Section 17c: a write makes a missing folder, whichever separator names it", function()
+	local util = require("mdkite.util")
+	local dirname
+	local i = 1
+	while true do
+		local name, value = debug.getupvalue(util.write_text, i)
+		if name == nil or name == "dirname" then
+			dirname = value
+			break
+		end
+		i = i + 1
+	end
+	if type(dirname) ~= "function" then
+		error("Section 17c: write_text holds no dirname", 0)
+	end
+	eq(dirname("a/b/c.md"), "a/b/", "a path spelled with / names its folder")
+	eq(dirname("a\\b\\c.md"), "a\\b\\", "a path spelled with \\ names its folder")
+	eq(dirname("C:\\cache\\mdkite/shared/c.md"), "C:\\cache\\mdkite/shared/", "a path that mixes them names its last")
+	eq(dirname("c.md"), "./", "a bare name names the current folder")
+	local path = vim.fs.joinpath(H.tmpdir(), "missing", "folder") .. "/c.md"
+	util.write_text(path, "made")
+	eq(vim.fn.readblob(path), "made", "a write into a missing folder spelled with / makes it")
+end)
+calls.start, calls.stop = 0, 0
+
 H.case("Section 14b: a retarget whose workspace cannot be created leaves the running preview", function()
 	mp.setup({ port = free_port() })
 	H.defer(function()
