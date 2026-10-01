@@ -159,7 +159,7 @@ end
 ---  Table = full command (URL appended). nil = system default.
 function M.open_in_browser(url, browser)
 	local function warn(what)
-		vim.notify(("Markdown Preview: %s.\nOpen manually: %s"):format(what, url), vim.log.levels.WARN)
+		vim.notify(("mdkite: %s.\nOpen manually: %s"):format(what, url), vim.log.levels.WARN)
 	end
 
 	if browser then

@@ -930,7 +930,7 @@
         const loadedPacks = new Set();
 
         // Live-reload auth token. Either substituted into the document by
-        // markdown-preview.nvim at file-write time, or passed via ?t=<token>
+        // mdkite at file-write time, or given as ?t=<token>
         // in the URL on first load (then stashed in sessionStorage so it
         // survives refreshes). Empty string when the server has no auth.
         const LIVE_TOKEN = (() => {
@@ -1017,7 +1017,7 @@
 
         // ── Markdown-it setup ─────────────────────────────────────────
         if (!window.markdownit) {
-            console.error('[markdown-preview] markdown-it not loaded from CDN');
+            console.error('[mdkite] markdown-it not loaded from CDN');
             showContent();
             contentEl.innerHTML = '<p style="color:var(--err-fg)">Failed to load markdown-it from CDN. Check your internet connection.</p>';
         }
@@ -1265,7 +1265,7 @@
             try {
                 const resp = await fetch(withToken('content.md?ts=' + Date.now()), { cache: 'no-store' });
                 if (!resp.ok) {
-                    console.warn('[markdown-preview] content.md fetch failed:', resp.status);
+                    console.warn('[mdkite] content.md fetch failed:', resp.status);
                     if (resp.status === 401) {
                         // Stale token (server restarted since this tab loaded).
                         // Evict it so the next load bootstraps fresh.
@@ -1275,7 +1275,7 @@
                 }
                 return (await resp.text()).replace(/\r\n?/g, '\n');
             } catch (e) {
-                console.warn('[markdown-preview] content.md fetch error:', e);
+                console.warn('[mdkite] content.md fetch error:', e);
                 return null;
             }
         }
@@ -1339,7 +1339,7 @@
 
                 setStatus('Updated ' + nowTime());
             } catch (e) {
-                console.error('[markdown-preview] render error:', e);
+                console.error('[mdkite] render error:', e);
                 contentEl.innerHTML = '<pre style="white-space:pre-wrap;padding:1rem">' +
                     text.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre>';
                 setStatus('Render error: ' + e.message);
@@ -1413,7 +1413,7 @@
                 } catch (_) {}
             });
             evtSource.addEventListener('open', () => {
-                console.log('[markdown-preview] SSE connected');
+                console.log('[mdkite] SSE connected');
                 sseConnected = true;
                 setConnectionState('connected');
             });
@@ -1575,7 +1575,7 @@
                 applyTheme(currentTheme);
                 await sync(true);
             } catch (e) {
-                console.error('[markdown-preview] boot error:', e);
+                console.error('[mdkite] boot error:', e);
                 showContent();
                 contentEl.innerHTML = '<p style="color:var(--err-fg)">Error: ' + (e.message || e) + '</p>';
             }

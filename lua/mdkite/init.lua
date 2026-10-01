@@ -211,7 +211,7 @@ local function write_index(dir)
 				return "<style>\n" .. css .. "\n</style>\n</head>"
 			end, 1)
 		else
-			vim.notify("Markdown Preview: custom_css not readable: " .. css_src, vim.log.levels.WARN)
+			vim.notify("mdkite: custom_css not readable: " .. css_src, vim.log.levels.WARN)
 		end
 	end
 
@@ -276,7 +276,7 @@ local function is_mmdr_available()
 	M._mmdr_available = vim.fn.executable("mmdr") == 1
 	if not M._mmdr_available then
 		vim.notify(
-			"Markdown Preview: mermaid_renderer='rust' but `mmdr` not found in PATH.\n"
+			"mdkite: mermaid_renderer='rust' but `mmdr` not found in PATH.\n"
 				.. "Install: cargo install mermaid-rs-renderer\n"
 				.. "Falling back to browser-side mermaid.js.",
 			vim.log.levels.WARN
@@ -460,7 +460,7 @@ local function report_push(what, pushed, err)
 		return
 	end
 	push_reported[inst][what] = true
-	vim.notify(("Markdown Preview: could not %s: %s"):format(what, tostring(err)), vim.log.levels.WARN)
+	vim.notify(("mdkite: could not %s: %s"):format(what, tostring(err)), vim.log.levels.WARN)
 end
 
 -- A refusal repeats on every cursor move, so each kind is told once per primary port.
@@ -471,7 +471,7 @@ local function report_remote(what, port, cause)
 		return
 	end
 	remote_reported[key] = true
-	vim.notify(("Markdown Preview: could not %s: %s"):format(what, tostring(cause)), vim.log.levels.WARN)
+	vim.notify(("mdkite: could not %s: %s"):format(what, tostring(cause)), vim.log.levels.WARN)
 end
 
 local function maybe_refresh(bufnr, silent)
@@ -497,7 +497,7 @@ local function maybe_refresh(bufnr, silent)
 	end
 
 	if not silent and M.config.notify_on_refresh then
-		vim.notify("Markdown preview updated", vim.log.levels.INFO)
+		vim.notify("mdkite: preview updated", vim.log.levels.INFO)
 	end
 	return true
 end
@@ -551,7 +551,7 @@ local function set_autocmds_for_buffer(bufnr)
 	if M._augroup then
 		pcall(vim.api.nvim_del_augroup_by_id, M._augroup)
 	end
-	M._augroup = vim.api.nvim_create_augroup("MarkdownPreviewAuto", { clear = true })
+	M._augroup = vim.api.nvim_create_augroup("MdKiteAuto", { clear = true })
 
 	if M.config.auto_refresh then
 		for _, ev in ipairs(M.config.auto_refresh_events) do
@@ -562,7 +562,7 @@ local function set_autocmds_for_buffer(bufnr)
 				callback = function()
 					debounced_refresh(bufnr)
 				end,
-				desc = "Markdown Preview auto-refresh (debounced)",
+				desc = "mdkite auto-refresh (debounced)",
 			})
 			if not made then
 				error("auto_refresh_events: " .. tostring(err), 0)
@@ -577,7 +577,7 @@ local function set_autocmds_for_buffer(bufnr)
 			callback = function()
 				send_scroll_sync(bufnr)
 			end,
-			desc = "Markdown Preview scroll sync",
+			desc = "mdkite scroll sync",
 		})
 	end
 end
@@ -618,8 +618,7 @@ local function wildcard_loopback(ip)
 		if not rule_reported[inst] then
 			rule_reported[inst] = true
 			vim.notify(
-				"Markdown Preview: live-server's wildcard rule raised, so the URL names the address bound: "
-					.. tostring(loopback),
+				"mdkite: live-server's wildcard rule raised, so the URL names the address bound: " .. tostring(loopback),
 				vim.log.levels.WARN
 			)
 		end
@@ -706,7 +705,7 @@ function M.start()
 		and M.config.host ~= "0.0.0.0"
 	then
 		vim.notify(
-			'Markdown Preview: takeover mode supports host = "127.0.0.1", "localhost" or "0.0.0.0" only.\n'
+			'mdkite: takeover mode supports host = "127.0.0.1", "localhost" or "0.0.0.0" only.\n'
 				.. 'Use "0.0.0.0" for LAN access, or instance_mode = "multi" to bind a specific interface.',
 			vim.log.levels.ERROR
 		)
@@ -715,7 +714,7 @@ function M.start()
 
 	local ok_content, text = pcall(get_content, bufnr)
 	if not ok_content then
-		vim.notify("Markdown Preview: " .. tostring(text), vim.log.levels.ERROR)
+		vim.notify("mdkite: " .. tostring(text), vim.log.levels.ERROR)
 		return
 	end
 
@@ -728,7 +727,7 @@ function M.start()
 			forget_session()
 		end
 		vim.notify(
-			("Markdown Preview: could not create the workspace %s: %s"):format(dir, tostring(mkdir_err)),
+			("mdkite: could not create the workspace %s: %s"):format(dir, tostring(mkdir_err)),
 			vim.log.levels.ERROR
 		)
 		return
@@ -761,10 +760,7 @@ function M.start()
 			end)
 			if not joined then
 				forget_session()
-				vim.notify(
-					"Markdown Preview: could not join the running preview: " .. tostring(join_err),
-					vim.log.levels.ERROR
-				)
+				vim.notify("mdkite: could not join the running preview: " .. tostring(join_err), vim.log.levels.ERROR)
 			end
 			return
 		end
@@ -777,7 +773,7 @@ function M.start()
 		local made, token = pcall(ls_util.random_token, 16)
 		if not made then
 			forget_session()
-			vim.notify("Markdown Preview: could not make a session token: " .. tostring(token), vim.log.levels.ERROR)
+			vim.notify("mdkite: could not make a session token: " .. tostring(token), vim.log.levels.ERROR)
 			return
 		end
 		M._token = token
@@ -796,7 +792,7 @@ function M.start()
 	if not (ls_server.features and ls_server.features.asset_route) and not M._warned_no_asset_route then
 		M._warned_no_asset_route = true
 		vim.notify(
-			"Markdown Preview: relative images need a newer live-server.nvim (with the asset route).\n"
+			"mdkite: relative images need a newer live-server.nvim (with the asset route).\n"
 				.. "Update live-server.nvim, or relative images will not load.",
 			vim.log.levels.WARN
 		)
@@ -850,11 +846,11 @@ function M.start()
 		if not ok then
 			forget_session()
 			local reason = tostring(inst)
-			local msg = ("Markdown Preview: failed to start server (port %s): %s"):format(tostring(port), reason)
+			local msg = ("mdkite: failed to start server (port %s): %s"):format(tostring(port), reason)
 			-- Every held-port refusal carries luv's text; a port the OS chose is named only in the reason.
 			if port ~= 0 and reason:find("EADDRINUSE: address already in use", 1, true) then
 				msg = (
-					"Markdown Preview: port %s is in use by another program. Set port to a free one in setup(), "
+					"mdkite: port %s is in use by another program. Set port to a free one in setup(), "
 					.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.'
 				):format(tostring(port))
 				-- A probe that timed out reads a live primary as gone; its lock still names the port.
@@ -862,7 +858,7 @@ function M.start()
 				local held = M.config.instance_mode == "takeover" and lock.read()
 				-- A stale lock names the port too; only a holder that answers a connect gets the hint.
 				if held and held.port == port and lock.is_server_alive(port) then
-					msg = msg .. " Another Neovim's preview may hold it: run :MarkdownPreview again to join it."
+					msg = msg .. " Another Neovim's preview may hold it: run :MdKite again to join it."
 				end
 			end
 			vim.notify(msg, vim.log.levels.ERROR)
@@ -885,10 +881,7 @@ function M.start()
 		if not finished then
 			abandon(inst)
 			vim.notify(
-				("Markdown Preview: failed to start server (port %s): %s"):format(
-					tostring(inst.port),
-					tostring(finish_err)
-				),
+				("mdkite: failed to start server (port %s): %s"):format(tostring(inst.port), tostring(finish_err)),
 				vim.log.levels.ERROR
 			)
 			return
@@ -913,7 +906,7 @@ function M.start()
 			-- The server still serves the last workspace, so the preview
 			-- and its autocmds stay with it.
 			M._workspace_dir = served_dir
-			vim.notify("Markdown Preview: could not retarget: " .. tostring(watching), vim.log.levels.ERROR)
+			vim.notify("mdkite: could not retarget: " .. tostring(watching), vim.log.levels.ERROR)
 			return
 		end
 		local inst = M._server_instance
@@ -928,7 +921,7 @@ function M.start()
 			if not back then
 				abandon(inst)
 				vim.notify(
-					("Markdown Preview: could not retarget: %s; the server could not go back and is stopped: %s"):format(
+					("mdkite: could not retarget: %s; the server could not go back and is stopped: %s"):format(
 						tostring(publish_err),
 						tostring(back_err)
 					),
@@ -936,7 +929,7 @@ function M.start()
 				)
 				return
 			end
-			vim.notify("Markdown Preview: could not retarget: " .. tostring(publish_err), vim.log.levels.ERROR)
+			vim.notify("mdkite: could not retarget: " .. tostring(publish_err), vim.log.levels.ERROR)
 			return
 		end
 		-- The last buffer's autocmds went with the group: nothing would refresh the preview.
@@ -944,7 +937,7 @@ function M.start()
 		if not armed then
 			abandon(inst)
 			vim.notify(
-				("Markdown Preview: could not retarget: %s; the server is stopped"):format(tostring(arm_err)),
+				("mdkite: could not retarget: %s; the server is stopped"):format(tostring(arm_err)),
 				vim.log.levels.ERROR
 			)
 			return
@@ -952,7 +945,7 @@ function M.start()
 		-- An edit here still refreshes: this plugin pushes its own reload.
 		if watching == false then
 			vim.notify(
-				"Markdown Preview: the server reports file watching off; changes made outside this editor may not refresh the preview",
+				"mdkite: the server reports file watching off; changes made outside this editor may not refresh the preview",
 				vim.log.levels.WARN
 			)
 		end
@@ -974,7 +967,7 @@ function M.refresh()
 	local bufnr = vim.api.nvim_get_current_buf()
 	local changed = maybe_refresh(bufnr, false)
 	if not changed and M.config.notify_on_refresh then
-		vim.notify("Markdown Preview: no changes detected", vim.log.levels.INFO)
+		vim.notify("mdkite: no changes detected", vim.log.levels.INFO)
 	end
 end
 

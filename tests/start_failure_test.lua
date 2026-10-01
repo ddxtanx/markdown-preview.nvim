@@ -62,14 +62,14 @@ mp.setup({
 -- The plugin's autocmds; nvim_get_autocmds raises for a group that does
 -- not exist, which counts as none.
 local function armed()
-	local got, list = pcall(vim.api.nvim_get_autocmds, { group = "MarkdownPreviewAuto" })
+	local got, list = pcall(vim.api.nvim_get_autocmds, { group = "MdKiteAuto" })
 	return got and #list or 0
 end
 
 -- The plugin's autocmds on one buffer; no group counts as none.
 local function armed_on(bufnr)
 	local n = 0
-	local got, list = pcall(vim.api.nvim_get_autocmds, { group = "MarkdownPreviewAuto" })
+	local got, list = pcall(vim.api.nvim_get_autocmds, { group = "MdKiteAuto" })
 	for _, au in ipairs(got and list or {}) do
 		if au.buffer == bufnr then
 			n = n + 1
@@ -227,7 +227,7 @@ H.case("Section 1c2: any other start failure keeps the generic notice", function
 	eq(#notes, 1, "one notice for the failed start")
 	eq(
 		notes[1] and notes[1].msg,
-		"Markdown Preview: failed to start server (port 18421): Failed to bind 127.0.0.1:18421: EACCES: permission denied",
+		"mdkite: failed to start server (port 18421): Failed to bind 127.0.0.1:18421: EACCES: permission denied",
 		"the notice names the port and carries the reason"
 	)
 end)
@@ -316,7 +316,7 @@ H.case("Section 1c4: an OS-assigned port refused keeps the generic notice", func
 	eq(#notes, 1, "one notice for the failed start")
 	eq(
 		notes[1] and notes[1].msg,
-		"Markdown Preview: failed to start server (port 0): " .. reason,
+		"mdkite: failed to start server (port 0): " .. reason,
 		"the notice carries the reason, which names the port the OS chose"
 	)
 end)
@@ -350,7 +350,7 @@ for _, holder in ipairs({ "this process", "another process" }) do
 		eq(#notes, 1, "one notice for the failed start")
 		eq(
 			notes[1] and notes[1].msg,
-			("Markdown Preview: port %d is in use by another program. Set port to a free one in setup(), "):format(port)
+			("mdkite: port %d is in use by another program. Set port to a free one in setup(), "):format(port)
 				.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.',
 			"the notice names the port the start asked for"
 		)
@@ -381,7 +381,7 @@ H.case("Section 1c6: a host spelled like the error name keeps the generic notice
 	then
 		local msg = tostring(notes[1] and notes[1].msg)
 		ok(
-			vim.startswith(msg, "Markdown Preview: failed to start server (port 18421): "),
+			vim.startswith(msg, "mdkite: failed to start server (port 18421): "),
 			"the notice is the generic one: " .. msg
 		)
 		ok(msg:find('"EADDRINUSE:"', 1, true) ~= nil, "the notice carries the host live-server refused: " .. msg)
@@ -418,7 +418,7 @@ for _, shape in ipairs({
 		eq(notes[1] and notes[1].level, vim.log.levels.ERROR, "the notice is an error")
 		eq(
 			notes[1] and notes[1].msg,
-			("Markdown Preview: port %d is in use by another program. Set port to a free one in setup(), "):format(port)
+			("mdkite: port %d is in use by another program. Set port to a free one in setup(), "):format(port)
 				.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.',
 			"the notice names the port and the settings that avoid it"
 		)
@@ -491,7 +491,7 @@ H.case("Section 3: a retarget live-server refuses keeps the preview where it was
 	eq(#notes, 1, "one notice for a retarget that raised")
 	eq(
 		notes[1] and notes[1].msg,
-		"Markdown Preview: could not retarget: update_target: root /gone does not resolve (ENOENT)",
+		"mdkite: could not retarget: update_target: root /gone does not resolve (ENOENT)",
 		"the notice carries the raise's message"
 	)
 	eq(notes[1] and notes[1].level, vim.log.levels.ERROR, "the notice is an error")
@@ -514,7 +514,7 @@ H.case("Section 3b: a retarget that cannot watch says file watching is off", fun
 	eq(#notes, 1, "one notice for a retarget that could not watch")
 	eq(
 		notes[1] and notes[1].msg,
-		"Markdown Preview: the server reports file watching off; changes made outside this editor may not refresh the preview",
+		"mdkite: the server reports file watching off; changes made outside this editor may not refresh the preview",
 		"the notice names what stops refreshing and no cause"
 	)
 	eq(notes[1] and notes[1].level, vim.log.levels.WARN, "the notice is a warning")
@@ -535,7 +535,7 @@ H.case("Section 3c: a retarget whose reload live-server refuses says so", functi
 	eq(#notes, 1, "one notice for a reload that raised on a retarget")
 	eq(
 		notes[1] and notes[1].msg,
-		"Markdown Preview: could not reload the preview: reload: the path is not a string (nil)",
+		"mdkite: could not reload the preview: reload: the path is not a string (nil)",
 		"the notice carries the raise's message"
 	)
 	ok(armed_on(second_buf) > 0, "the retarget still arms the buffer")
@@ -731,10 +731,7 @@ H.case("Section 6: a refused start leaves a running preview's files and lock alo
 	eq(#notes, 1, "one notice for the refused start")
 	ok(
 		notes[1] ~= nil
-			and vim.endswith(
-				notes[1].msg,
-				" Another Neovim's preview may hold it: run :MarkdownPreview again to join it."
-			),
+			and vim.endswith(notes[1].msg, " Another Neovim's preview may hold it: run :MdKite again to join it."),
 		"the notice says another Neovim's preview may hold the port: " .. tostring(notes[1] and notes[1].msg)
 	)
 	eq(mp._server_instance, nil, "no server instance is kept")
@@ -793,7 +790,7 @@ H.case("Section 7: a session token that cannot be made fails the start with one 
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
-	one_clean_error(notes, "Markdown Preview: could not make a session token: random_token: no secure random source")
+	one_clean_error(notes, "mdkite: could not make a session token: random_token: no secure random source")
 	eq(mp._server_instance, nil, "no server instance is kept")
 	eq(armed(), 0, "no autocmd is armed")
 	eq(mp._token, nil, "no token is kept")
@@ -814,7 +811,7 @@ H.case("Section 7b: autocmds that cannot be armed stop the server and remove the
 	local ran, err = pcall(mp.start)
 	H.defer(mp.stop)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
-	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): "):format(port))
+	one_clean_error(notes, ("mdkite: failed to start server (port %d): "):format(port))
 	eq(mp._server_instance, nil, "no server instance is kept")
 	ok(port_free(port), "the server is stopped: its port binds again")
 	eq(
@@ -837,7 +834,7 @@ H.case("Section 7c: content that cannot be written stops the server with one not
 	local ran, err = pcall(mp.start)
 	H.defer(mp.stop)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
-	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): ENOSPC"):format(port))
+	one_clean_error(notes, ("mdkite: failed to start server (port %d): ENOSPC"):format(port))
 	eq(mp._server_instance, nil, "no server instance is kept")
 	ok(port_free(port), "the server is stopped: its port binds again")
 	eq(armed_on(first_buf), 0, "no autocmd is armed")
@@ -855,7 +852,7 @@ H.case("Section 7d: a lock that cannot be opened stops the server with one notic
 	local ran, err = pcall(mp.start)
 	H.defer(mp.stop)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
-	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): "):format(port))
+	one_clean_error(notes, ("mdkite: failed to start server (port %d): "):format(port))
 	eq(mp._server_instance, nil, "no server instance is kept")
 	ok(port_free(port), "the server is stopped: its port binds again")
 	eq(armed_on(first_buf), 0, "no autocmd is armed")
@@ -872,7 +869,7 @@ H.case("Section 7e: a retarget whose content cannot be written goes back to the 
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
-	one_clean_error(notes, "Markdown Preview: could not retarget: ENOSPC")
+	one_clean_error(notes, "mdkite: could not retarget: ENOSPC")
 	eq(mp._workspace_dir, before, "the workspace pointer is the one served before")
 	ok(armed_on(first_buf) > 0, "the served buffer keeps its autocmds")
 	eq(armed_on(second_buf), 0, "the refused buffer is not armed")
@@ -902,7 +899,7 @@ H.case("Section 7f: a retarget that cannot go back either stops the server", fun
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
-	one_clean_error(notes, "Markdown Preview: could not retarget: ENOSPC")
+	one_clean_error(notes, "mdkite: could not retarget: ENOSPC")
 	ok(
 		notes[1] and notes[1].msg:find("update_target: root is gone (stubbed)", 1, true),
 		"the notice names the way back's refusal too"
@@ -1048,9 +1045,7 @@ H.case("Section 8b: a scroll push nothing answers is told once", function()
 		notes[1] ~= nil
 			and vim.startswith(
 				notes[1].msg,
-				("Markdown Preview: could not sync the scroll: the primary on port %d is gone (ECONNREFUSED"):format(
-					port
-				)
+				("mdkite: could not sync the scroll: the primary on port %d is gone (ECONNREFUSED"):format(port)
 			),
 		"the notice says the primary is gone: " .. tostring(notes[1] and notes[1].msg)
 	)
@@ -1132,7 +1127,7 @@ H.case("Section 10: takeover refuses a host other than 127.0.0.1, localhost and 
 	eq(#notes, 1, "one notice for the refused host")
 	eq(
 		notes[1] and notes[1].msg,
-		'Markdown Preview: takeover mode supports host = "127.0.0.1", "localhost" or "0.0.0.0" only.\n'
+		'mdkite: takeover mode supports host = "127.0.0.1", "localhost" or "0.0.0.0" only.\n'
 			.. 'Use "0.0.0.0" for LAN access, or instance_mode = "multi" to bind a specific interface.',
 		"the notice names the three hosts takeover accepts"
 	)
@@ -1178,7 +1173,7 @@ H.case("Section 11: a secondary whose autocmds cannot be armed joins nothing", f
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
-	one_clean_error(notes, "Markdown Preview: could not join the running preview: auto_refresh_events:")
+	one_clean_error(notes, "mdkite: could not join the running preview: auto_refresh_events:")
 	nothing_joined(first_buf)
 end)
 
@@ -1193,7 +1188,7 @@ H.case("Section 11b: a secondary whose content cannot be written joins nothing",
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
-	one_clean_error(notes, "Markdown Preview: could not join the running preview: ENOSPC")
+	one_clean_error(notes, "mdkite: could not join the running preview: ENOSPC")
 	nothing_joined(first_buf)
 end)
 calls.start, calls.stop = 0, 0
@@ -1324,7 +1319,7 @@ H.case("Section 14: a workspace that cannot be created fails the start with one 
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
-	one_clean_error(notes, "Markdown Preview: could not create the workspace ")
+	one_clean_error(notes, "mdkite: could not create the workspace ")
 	eq(mp._server_instance, nil, "no server instance is kept")
 	eq(mp._workspace_dir, nil, "no workspace pointer is kept")
 	eq(mp._token, nil, "no token is kept")
@@ -1349,7 +1344,7 @@ H.case("Section 7g: a retarget whose autocmds cannot be armed stops the server w
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
-	one_clean_error(notes, "Markdown Preview: could not retarget: auto_refresh_events:")
+	one_clean_error(notes, "mdkite: could not retarget: auto_refresh_events:")
 	eq(mp._server_instance, nil, "no server instance is kept")
 	ok(port_free(port), "the server is stopped: its port binds again")
 	eq(armed(), 0, "no autocmd is armed")
@@ -1431,7 +1426,7 @@ H.case("Section 7h: a bundled index that cannot be read stops the server with on
 	local ran, err = pcall(mp.start)
 	H.defer(mp.stop)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
-	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): EACCES"):format(port))
+	one_clean_error(notes, ("mdkite: failed to start server (port %d): EACCES"):format(port))
 	eq(mp._server_instance, nil, "no server instance is kept")
 	ok(port_free(port), "the server is stopped: its port binds again")
 end)
@@ -1686,7 +1681,7 @@ H.case("Section 14b: a retarget whose workspace cannot be created leaves the run
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
-	one_clean_error(notes, "Markdown Preview: could not create the workspace ")
+	one_clean_error(notes, "mdkite: could not create the workspace ")
 	eq(mp._server_instance, inst, "the running server is kept")
 	eq(mp._token, token, "its token is kept")
 	eq(mp._workspace_dir, ws, "its workspace pointer is kept")
