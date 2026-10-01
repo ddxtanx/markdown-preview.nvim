@@ -24,7 +24,7 @@ permissions:
 # report.
 env:
   KITEHOST_FLOOR: v2.0.0
-  KITEHOST_FLOOR_SHA: TO-BE-SET-AT-TAG
+  KITEHOST_FLOOR_SHA: 4cb5c94a84cc653e0b32e0c9aed95465a36fc94d
   # The one bun pin, for the format and browser jobs.
   BUN_VERSION: 1.4.2
 
