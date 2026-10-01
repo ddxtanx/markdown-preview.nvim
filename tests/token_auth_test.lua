@@ -267,8 +267,10 @@ H.section("Section 6: the preview URL")
 -- Every row reads the URL on_start receives: its host is the address the
 -- server bound as a browser reaches it, and the token rides along on any
 -- bind but 127.0.0.1, whose index carries it.
--- The URL on_start receives for a start on host; "" when none came.
-local function url_for(host)
+-- The URL on_start receives for a start on host; "" when none came. With
+-- fetch, also what that URL answers and the session's token, read before
+-- the stop.
+local function url_for(host, fetch)
 	local url
 	mp.setup({
 		open_browser = false,
@@ -282,8 +284,12 @@ local function url_for(host)
 		},
 	})
 	mp.start()
+	local page, token
+	if fetch and url then
+		page, token = http_get(url), mp._token
+	end
 	mp.stop()
-	return url or ""
+	return url or "", page or { status = 0, body = "" }, token
 end
 -- An IPv6 literal takes brackets, or its colons read as the port.
 local probe = uv.new_tcp()
@@ -337,10 +343,18 @@ ok(loop_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil, "a loopback bind's URL h
 -- 127.0.0.1, where a server before it raised; a browser tries
 -- localhost's ::1 first, where another program may listen, so the URL
 -- names the address bound.
-local localhost_url = url_for("localhost")
+local localhost_url, localhost_page, localhost_token = url_for("localhost", true)
 ok(
 	localhost_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil,
 	"a localhost bind opens 127.0.0.1 with no ?t=: " .. localhost_url
+)
+-- The URL can drop the token only while the index carries it: a gated
+-- index would open a 401 page on every localhost preview.
+eq(localhost_page.status, 200, "the page a localhost bind opens answers 200")
+local localhost_baked = localhost_page.body:match('data%-live%-token="([^"]*)"')
+ok(
+	localhost_token ~= nil and localhost_baked == localhost_token,
+	"and its index carries the session's token: " .. tostring(localhost_baked)
 )
 local net_url = url_for("0.0.0.0")
 ok(net_url:find("?t=", 1, true) ~= nil, "a network bind's URL keeps ?t=: " .. net_url)
