@@ -202,6 +202,7 @@ end
 package.loaded[MODULE] = nil
 source_err = source_plugin()
 local message = require(MODULE .. ".floor").message
+H.ok(vim.startswith(message, "mdkite: "), "the floor text starts mdkite:, as every notice does: " .. message)
 H.ok(message:find("0.10", 1, true) ~= nil, "the floor text names the floor")
 -- lazy.nvim's cmd and keys specs run the command they were given, so each
 -- documented one, and each from before the rename, exists below the floor

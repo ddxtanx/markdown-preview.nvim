@@ -9,5 +9,5 @@
 -- all of them.
 return {
 	ok = vim.fn.has("nvim-0.10") == 1 and vim.uv ~= nil and vim.fs.joinpath ~= nil and vim.uri_encode ~= nil,
-	message = "mdkite.nvim requires Neovim 0.10 or newer",
+	message = "mdkite: requires Neovim 0.10 or newer",
 }
