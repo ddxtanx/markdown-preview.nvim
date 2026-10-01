@@ -1819,13 +1819,28 @@ local function older_tree()
 	return table.concat(listed, "\n")
 end
 
--- This release's lock, as another Neovim of it writes one, until the case ends.
-local function current_lock(port)
+-- This release's lock, as another Neovim of it writes one, naming pid when
+-- given, until the case ends.
+local function current_lock(port, pid)
 	local lock = require("mdkite.lock")
 	local path = vim.fs.joinpath(require("mdkite.util").cache_dir(), "server.lock")
 	vim.fn.mkdir(vim.fs.dirname(path), "p")
-	H.write_file(path, vim.json.encode({ port = port, token = "peer", host = "127.0.0.1" }))
+	H.write_file(path, vim.json.encode({ port = port, pid = pid, token = "peer", host = "127.0.0.1" }))
 	H.defer(lock.remove)
+end
+
+-- The pid of a process that has exited and been reaped, as a crashed
+-- Neovim's lock names one; a pid the system already gave again would make
+-- the rows read a live process, so it raises.
+local function dead_pid()
+	local proc = vim.system({ vim.v.progpath, "--version" })
+	local pid = proc.pid
+	proc:wait()
+	local sent, err, name = vim.uv.kill(pid, 0)
+	if sent or name ~= "ESRCH" then
+		error(("dead_pid: pid %d still answers signal 0 (%s)"):format(pid, tostring(sent or err)), 0)
+	end
+	return pid
 end
 
 -- A takeover start on port from the first buffer; the notices it made.
@@ -1849,7 +1864,7 @@ end)
 
 H.case("Section 19a: an older release's live preview is named, and no start fights it", function()
 	local port = held_port("127.0.0.1")
-	older_lock({ port = port, workspace = "/older/shared", pid = 1, token = "older" })
+	older_lock({ port = port, workspace = "/older/shared", pid = vim.fn.getpid(), token = "older" })
 	local before = older_tree()
 	local starts = 0
 	local real_start = ls_server.start
@@ -1951,6 +1966,103 @@ H.case("Section 19e: a held port an older release's preview may hold says so", f
 		rows[2] .. ": " .. tostring(notes[1] and notes[1].msg)
 	)
 	eq(older_tree(), before, "nothing is written under the older cache directory")
+end)
+calls.start, calls.stop = 0, 0
+
+H.case("Section 19f: a lock counts while its process runs and its port answers", function()
+	local lock = require("mdkite.lock")
+	local port = held_port("127.0.0.1")
+	local function reads(pid)
+		current_lock(port, pid)
+		local held = lock.holder()
+		return held and held.port or "none"
+	end
+	eq(reads(nil), port, "a lock with no pid counts while its port answers, as before")
+	eq(reads(0), port, "a pid of 0 names no process, so the probe alone decides")
+	eq(reads(vim.fn.getpid()), port, "a lock whose process runs counts while its port answers")
+	eq(reads(dead_pid()), "none", "a lock whose process is gone counts for nothing, though its port answers")
+	if vim.fn.has("win32") == 1 then
+		H.skip("a lock whose process runs under another account counts (Windows has no process 1 to read)")
+	else
+		eq(reads(1), port, "a lock whose process runs under another account counts (EPERM)")
+	end
+	current_lock(free_port(), vim.fn.getpid())
+	eq(lock.holder(), nil, "a lock whose process runs counts for nothing while its port refuses")
+end)
+
+-- Both releases take 8421 in takeover, so the two locks below name one
+-- port, which one listener holds for whichever server still runs.
+H.case("Section 19g: on one port, a crashed lock of this release beside an older live preview", function()
+	local port = held_port("127.0.0.1")
+	older_lock({ port = port, pid = vim.fn.getpid(), token = "older" })
+	current_lock(port, dead_pid())
+	local before = older_tree()
+	local starts = 0
+	local real_start = ls_server.start
+	stub("start", function(...)
+		starts = starts + 1
+		return real_start(...)
+	end)
+	local notes = takeover_start(port)
+	eq(#notes, 1, "one notice")
+	ok(
+		notes[1] ~= nil
+			and notes[1].msg:find(
+					("an older release's preview in another Neovim holds port %d:"):format(port),
+					1,
+					true
+				)
+				~= nil,
+		"the notice names the older preview: " .. tostring(notes[1] and notes[1].msg)
+	)
+	eq(mp._is_primary, nil, "the start joins nothing, the older release's server least of all")
+	eq(starts, 0, "no server start fights it for the port")
+	eq(older_tree(), before, "nothing is written under the older cache directory")
+end)
+calls.start, calls.stop = 0, 0
+
+H.case("Section 19h: on one port, this release's live holder beside an older crashed lock", function()
+	local port = held_port("127.0.0.1")
+	older_lock({ port = port, pid = dead_pid(), token = "older" })
+	current_lock(port, vim.fn.getpid())
+	local notes = takeover_start(free_port())
+	eq(#notes, 0, "the join says nothing")
+	eq(mp._is_primary, false, "the start joins the preview this release's lock names")
+	eq(mp._takeover_port, port, "on the port both locks name")
+end)
+calls.start, calls.stop = 0, 0
+
+H.case("Section 19i: a timed-out probe of this release's holder names no older release", function()
+	local rows = { "one notice", "the notice offers the join, naming no older release" }
+	if skipped_without_raise("19i", rows) then
+		return
+	end
+	local port = held_port("127.0.0.1")
+	older_lock({ port = port, pid = dead_pid(), token = "older" })
+	current_lock(port, vim.fn.getpid())
+	-- The first probe times out, as a starved machine's did, so the start
+	-- reads this release's holder as gone and meets its port held.
+	local lock = require("mdkite.lock")
+	local real_alive = lock.is_server_alive
+	local probes = 0
+	lock.is_server_alive = function(...)
+		probes = probes + 1
+		if probes == 1 then
+			return false
+		end
+		return real_alive(...)
+	end
+	H.defer(function()
+		lock.is_server_alive = real_alive
+	end)
+	local notes = takeover_start(port)
+	eq(#notes, 1, rows[1])
+	ok(
+		notes[1] ~= nil
+			and not notes[1].msg:find("older release", 1, true)
+			and vim.endswith(notes[1].msg, " Another Neovim's preview may hold it: run :MdKite again to join it."),
+		rows[2] .. ": " .. tostring(notes[1] and notes[1].msg)
+	)
 end)
 calls.start, calls.stop = 0, 0
 

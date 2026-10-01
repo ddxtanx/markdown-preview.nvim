@@ -50,16 +50,33 @@ function M.read_old()
 	return read_at(old_lock_path())
 end
 
--- The lock whose holder answers, and whether it is the old one: this
--- release's first, then the old one, so a stale lock under either name
+-- Both releases take port 8421 in takeover, so the server answering on a
+-- lock's port may be the other release's: a lock counts only while the
+-- process it names runs too. Signal 0 sends nothing; ESRCH says the process
+-- is gone, and EPERM that it runs under another account. A lock without a
+-- usable pid, or a check that fails another way, leaves the probe alone to
+-- decide, as before.
+local function held(lock)
+	local pid = lock.pid
+	if type(pid) == "number" and pid % 1 == 0 and pid >= 1 and pid <= 2147483647 then
+		local sent, err, name = uv.kill(pid, 0)
+		if not sent and (name or tostring(err):match("^%u+")) == "ESRCH" then
+			return false
+		end
+	end
+	return M.is_server_alive(lock.port)
+end
+
+-- The lock whose holder runs and answers, and whether it is the old one:
+-- this release's first, then the old one, so a stale lock under either name
 -- counts for nothing. Read and probed through M, where a test replaces them.
 function M.holder()
 	local current = M.read()
-	if current and M.is_server_alive(current.port) then
+	if current and held(current) then
 		return current, false
 	end
 	local old = M.read_old()
-	if old and M.is_server_alive(old.port) then
+	if old and held(old) then
 		return old, true
 	end
 	return nil
