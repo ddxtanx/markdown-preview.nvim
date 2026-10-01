@@ -2150,10 +2150,14 @@ H.case("Section 19l: a lock's token is checked both ways", function()
 		mp.setup({ instance_mode = "multi", port = 18421 })
 	end)
 	vim.cmd("buffer " .. first_buf)
-	capture_notes()
+	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
 	H.defer(mp.stop)
 	ok(ran, "a start beside a lock whose token is a number raises nothing: " .. tostring(err))
+	-- A join that failed would leave no token too: the role and the port say it joined.
+	eq(mp._is_primary, false, "the start joins that lock's server")
+	eq(mp._takeover_port, open, "on the lock's port")
+	eq(#notes, 0, "with no notice: " .. vim.inspect(notes))
 	eq(mp._token, nil, "the joined preview keeps no token from that lock")
 end)
 calls.start, calls.stop = 0, 0
@@ -2214,6 +2218,56 @@ H.case("Section 19m: a token carrying & or = stays one query parameter", functio
 	eq(events, 1, "the push names its own event and the token adds none: " .. table.concat(lines, " | "))
 	eq(encoded, 2, "the token goes escaped in the check and the push: " .. table.concat(lines, " | "))
 end)
+
+-- A listener on a port of its own that answers as the server's releases
+-- 1.2.2 and 1.3.0 did, until the case ends: 200 for a target the inject
+-- route takes, which needs its ?, and 404 for any other, read as a file;
+-- its port.
+local function inject_route_only()
+	local server = assert(vim.uv.new_tcp())
+	H.defer(function()
+		server:close()
+	end)
+	assert(server:bind("127.0.0.1", 0))
+	assert(server:listen(8, function()
+		local client = assert(vim.uv.new_tcp())
+		server:accept(client)
+		local head = ""
+		client:read_start(function(err, chunk)
+			if err or not chunk then
+				return client:close()
+			end
+			head = head .. chunk
+			local target = head:match("^GET (%S+) HTTP/1%.1\r\n")
+			if target then
+				client:read_stop()
+				local status = target:find("^/__live/inject%?") and "200 OK" or "404 Not Found"
+				client:write(
+					("HTTP/1.1 %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"):format(status),
+					function()
+						client:close()
+					end
+				)
+			end
+		end)
+	end))
+	return server:getsockname().port
+end
+
+H.case("Section 19n: an older preview whose server takes the route only with a ? is named", function()
+	local port = inject_route_only()
+	older_lock({ port = port, pid = vim.fn.getpid() })
+	local before = older_tree()
+	local notes = takeover_start(port)
+	eq(#notes, 1, "one notice")
+	ok(
+		notes[1] ~= nil and notes[1].msg:find(("holds port %d:"):format(port), 1, true) ~= nil,
+		"the notice names the older preview: " .. tostring(notes[1] and notes[1].msg)
+	)
+	eq(mp._is_primary, nil, "no role is taken")
+	eq(older_tree(), before, "nothing is written under the older cache directory")
+end)
+calls.start, calls.stop = 0, 0
 
 -- A Neovim whose runtimepath holds this checkout and, ahead of it, the
 -- server directory server_dir (nil for none), with XDG directories of its

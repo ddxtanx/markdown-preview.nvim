@@ -53,7 +53,10 @@ local function inject(port, params, token, timeout_ms, on_done)
 	if type(token) == "string" and token ~= "" then
 		query = (query ~= "" and (query .. "&") or "") .. "t=" .. vim.uri_encode(token, "rfc2396")
 	end
-	local target = "/__live/inject" .. (query ~= "" and ("?" .. query) or "")
+	-- The ? stays with no query: the server's releases 1.2.2 and 1.3.0 route
+	-- the bare path to a file and answer 404, so an older preview there read
+	-- as no holder; 1.5.0 and later answer both alike (measured).
+	local target = "/__live/inject?" .. query
 	local req = string.format("GET %s HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n", target)
 	local connecting, connect_err = tcp:connect("127.0.0.1", port, function(err)
 		if err then

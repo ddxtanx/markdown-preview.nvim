@@ -135,8 +135,9 @@ function M.remove()
 	pcall(uv.fs_unlink, lock_path())
 end
 
--- How long a start blocks Neovim on one lock: each lock it reads, and the
--- held-port hint, waits at most this for the holder's answers.
+-- How long one read of a lock blocks Neovim waiting for its holder's
+-- answers. A start makes at most four: it reads up to two locks, this
+-- release's and an older one's, and the held-port hint reads them again.
 local CHECK_MS = 500
 
 -- Whether the server on port holds a lock carrying token, asked as a joined
