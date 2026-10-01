@@ -173,6 +173,7 @@ H.case("Section 1b: a lock that cannot be written leaves no state behind", funct
 	end)
 	capture_notes()
 	mp.start()
+	H.defer(mp.stop)
 	eq(armed(), 0, "no autocmd is armed after a lock failure")
 	eq(mp._token, nil, "the token is cleared")
 	eq(mp._workspace_dir, nil, "the workspace is cleared")
@@ -345,6 +346,7 @@ for _, holder in ipairs({ "this process", "another process" }) do
 		end)
 		local notes = capture_notes()
 		mp.start()
+		H.defer(mp.stop)
 		eq(#notes, 1, "one notice for the failed start")
 		eq(
 			notes[1] and notes[1].msg,
@@ -363,6 +365,7 @@ H.case("Section 1c6: a host spelled like the error name keeps the generic notice
 	end)
 	local notes = capture_notes()
 	mp.start()
+	H.defer(mp.stop)
 	eq(#notes, 1, "one notice for the failed start")
 	-- live-server owns the refusal's wording and may change it, so the rows
 	-- pin the notice's shape: the generic prefix, the host echoed back in the
@@ -410,6 +413,7 @@ for _, shape in ipairs({
 		end)
 		local notes = capture_notes()
 		mp.start()
+		H.defer(mp.stop)
 		eq(#notes, 1, "one notice for the failed start")
 		eq(notes[1] and notes[1].level, vim.log.levels.ERROR, "the notice is an error")
 		eq(
@@ -808,6 +812,7 @@ H.case("Section 7b: autocmds that cannot be armed stop the server and remove the
 	end)
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
+	H.defer(mp.stop)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
 	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): "):format(port))
 	eq(mp._server_instance, nil, "no server instance is kept")
@@ -830,6 +835,7 @@ H.case("Section 7c: content that cannot be written stops the server with one not
 	refuse_write("content.md")
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
+	H.defer(mp.stop)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
 	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): ENOSPC"):format(port))
 	eq(mp._server_instance, nil, "no server instance is kept")
@@ -847,6 +853,7 @@ H.case("Section 7d: a lock that cannot be opened stops the server with one notic
 	refuse_write("server.lock")
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
+	H.defer(mp.stop)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
 	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): "):format(port))
 	eq(mp._server_instance, nil, "no server instance is kept")
@@ -1398,9 +1405,15 @@ end)
 calls.start, calls.stop = 0, 0
 
 H.case("Section 7h: a bundled index that cannot be read stops the server with one notice", function()
+	-- The name the plugin reads, as the runtimepath gives it: Windows spells it
+	-- with backslashes, which a suffix match written with a slash never meets.
+	local index = require("markdown_preview.util").resolve_asset("assets/index.html")
+	if not index then
+		error("Section 7h: assets/index.html does not resolve", 0)
+	end
 	local real_open = vim.uv.fs_open
 	vim.uv.fs_open = function(p, flags, ...)
-		if flags == "r" and type(p) == "string" and vim.endswith(p, "assets/index.html") then
+		if flags == "r" and p == index then
 			return nil, "EACCES: permission denied (stubbed): " .. p, "EACCES"
 		end
 		return real_open(p, flags, ...)
@@ -1416,6 +1429,7 @@ H.case("Section 7h: a bundled index that cannot be read stops the server with on
 	vim.cmd("buffer " .. first_buf)
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
+	H.defer(mp.stop)
 	ok(ran, "start() returns instead of raising: " .. tostring(err))
 	one_clean_error(notes, ("Markdown Preview: failed to start server (port %d): EACCES"):format(port))
 	eq(mp._server_instance, nil, "no server instance is kept")
@@ -1689,26 +1703,24 @@ for _, shape in ipairs({
 		if skipped_without_raise("18, " .. shape.what, rows) then
 			return
 		end
-		-- Another port's lock meets a holder that answers; a stale lock's holder
-		-- is bound and never listening, so it holds the port and refuses a connect.
-		local port
-		if shape.other then
-			port = held_port("127.0.0.1")
-		else
-			local holder, holder_err = vim.uv.new_tcp()
-			if not holder then
-				error("Section 18: " .. tostring(holder_err), 0)
+		-- A listener holds the port on every OS, since Linux lets a SO_REUSEADDR
+		-- bind (libuv makes one on every Unix TCP bind) share a port held bound
+		-- and not listening; a stale lock's holder does not answer the probe, and
+		-- the other shape's lock names a free port, where the real probe is refused.
+		local port = held_port("127.0.0.1")
+		local lock = require("markdown_preview.lock")
+		if not shape.other then
+			local real_alive = lock.is_server_alive
+			lock.is_server_alive = function(p, ...)
+				if p == port then
+					return false
+				end
+				return real_alive(p, ...)
 			end
 			H.defer(function()
-				holder:close()
+				lock.is_server_alive = real_alive
 			end)
-			local bound, bind_err = holder:bind("127.0.0.1", 0)
-			if not bound then
-				error("Section 18: " .. tostring(bind_err), 0)
-			end
-			port = holder:getsockname().port
 		end
-		local lock = require("markdown_preview.lock")
 		local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
 		vim.fn.mkdir(vim.fs.dirname(lock_file), "p")
 		H.write_file(
@@ -1723,6 +1735,7 @@ for _, shape in ipairs({
 		vim.cmd("buffer " .. first_buf)
 		local notes = capture_notes()
 		mp.start()
+		H.defer(mp.stop)
 		eq(#notes, 1, rows[1])
 		ok(
 			notes[1] ~= nil
@@ -1734,6 +1747,7 @@ end
 calls.start, calls.stop = 0, 0
 
 H.case("Section 15b: a wildcard rule that raises is told once per server", function()
+	eq(mp._server_instance, nil, "no server runs before the case")
 	local real_start, real_rule = ls_server.start, ls_server.wildcard_loopback
 	local raising = false
 	stub("start", function(...)
