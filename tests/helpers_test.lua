@@ -659,7 +659,7 @@ else
 		for _, rel in ipairs({
 			"lua/live_server/server.lua",
 			"lua/live_server/util.lua",
-			"lua/markdown_preview/init.lua",
+			"lua/mdkite/init.lua",
 		}) do
 			vim.fn.mkdir(vim.fs.dirname(dir .. "/" .. rel), "p")
 			H.write_file(dir .. "/" .. rel, "return {}\n")

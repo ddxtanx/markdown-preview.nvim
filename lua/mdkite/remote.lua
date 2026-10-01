@@ -1,4 +1,4 @@
--- lua/markdown_preview/remote.lua
+-- lua/mdkite/remote.lua
 local uv = vim.uv
 
 local M = {}

@@ -125,11 +125,11 @@ async function waitForUrl(ms: number): Promise<string> {
 // earlier runtimepath entry cannot stand in for the one under test.
 async function proveOrigin() {
   const sources = await remoteExpr(
-    `luaeval("debug.getinfo(require('markdown_preview').setup, 'S').source .. string.char(10) .. debug.getinfo(require('live_server.server').start, 'S').source")`,
+    `luaeval("debug.getinfo(require('mdkite').setup, 'S').source .. string.char(10) .. debug.getinfo(require('live_server.server').start, 'S').source")`,
   );
   const [own, dep] = sources.split("\n").map((s) => realpathSync(s.replace(/^@/, "")));
   for (const [name, file, dir] of [
-    ["markdown_preview", own, root],
+    ["mdkite", own, root],
     ["live_server.server", dep, liveServer],
   ]) {
     if (!file.startsWith(dir + sep + "lua" + sep)) throw new Error(`${name} loaded from ${file}, outside ${dir}`);
@@ -186,14 +186,14 @@ beforeAll(async () => {
   writeFileSync(md, "# Smoke\n\nfirst paragraph\n");
   const lua = JSON.stringify;
   const setup =
-    "lua require('markdown_preview').setup({ open_browser = false, instance_mode = 'multi', debounce_ms = 50, " +
+    "lua require('mdkite').setup({ open_browser = false, instance_mode = 'multi', debounce_ms = 50, " +
     "hooks = { on_start = function(u) io.stdout:write('URL ' .. u .. '\\n') io.stdout:flush() end } })";
   nvim = Bun.spawn(
     [
       "nvim", "--headless", "-u", "NONE", "--listen", sock,
       "-c", `lua vim.opt.rtp:prepend(${lua(liveServerEntry)}) vim.opt.rtp:prepend(${lua(root)})`,
       "-c", `lua vim.cmd.edit(vim.fn.fnameescape(${lua(md)})) vim.bo.filetype = 'markdown'`,
-      "-c", setup, "-c", "lua require('markdown_preview').start()",
+      "-c", setup, "-c", "lua require('mdkite').start()",
     ],
     { env, stdout: Bun.file(outLog), stderr: Bun.file(errLog) },
   );

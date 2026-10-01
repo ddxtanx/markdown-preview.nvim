@@ -3,7 +3,7 @@
 -- served HTML and gates content.md, that the lockfile holding it is
 -- private, and (Section 6) that the preview URL names the address the
 -- server bound and carries the token on any bind but 127.0.0.1. The suite
--- drives require("markdown_preview").start() directly, not the
+-- drives require("mdkite").start() directly, not the
 -- :MarkdownPreview user command.
 --
 -- Run: nvim --headless -u NONE -l "$PWD/tests/token_auth_test.lua"
@@ -24,7 +24,7 @@ H.write_file(mdfile, "# hello\n\nbody text here.\n")
 vim.cmd("edit " .. vim.fn.fnameescape(mdfile))
 vim.bo.filetype = "markdown"
 
-local mp = require("markdown_preview")
+local mp = require("mdkite")
 -- Sections 0 to 2 run multi mode, a server on an OS-assigned port; the lock
 -- sections (3 to 5) write it or start takeover themselves, on a free port,
 -- never the shared 8421.
@@ -128,7 +128,7 @@ H.section("Section 3: the lockfile keeps the token private")
 -- over a 0644 file kept that mode (measured) until lock.write made it
 -- private before writing the token.
 local uv = vim.uv
-local lock = require("markdown_preview.lock")
+local lock = require("mdkite.lock")
 local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
 local function mode()
 	local stat = uv.fs_stat(lock_file)
@@ -203,7 +203,7 @@ H.write_file(
 	([[
 vim.opt.runtimepath:prepend(%q)
 vim.opt.runtimepath:prepend(%q)
-local mp = require("markdown_preview")
+local mp = require("mdkite")
 mp.setup({ open_browser = false, port = %d })
 vim.cmd("edit " .. vim.fn.fnameescape(%q))
 vim.bo.filetype = "markdown"
@@ -565,7 +565,7 @@ local function secondary_url(primary_host, drop_host)
 		([[
 vim.opt.runtimepath:prepend(%q)
 vim.opt.runtimepath:prepend(%q)
-local mp = require("markdown_preview")
+local mp = require("mdkite")
 local url = ""
 mp.setup({ open_browser = false, port = %d, host = "127.0.0.1", hooks = { on_start = function(u) url = u end } })
 vim.cmd("edit " .. vim.fn.fnameescape(%q))

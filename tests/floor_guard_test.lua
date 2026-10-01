@@ -2,8 +2,10 @@
 -- Below Neovim 0.10 every documented command is a refuser that answers each
 -- use with the floor module's text and the module answers a config's
 -- setup() without loading the plugin or live-server (one ERROR notification
--- at load between them), unless the config opted out; on a supported
--- version the commands are defined.
+-- at load between them), unless the config opted out under either load
+-- guard; on a supported version the commands are defined. The module's name
+-- from before the rename hands back the same table, warning once a session
+-- above the floor and adding nothing below it.
 --
 -- Run: nvim --headless -u NONE -l "$PWD/tests/floor_guard_test.lua"
 -- live-server.nvim is found by tests/helpers.lua ($LIVE_SERVER_RTP,
@@ -11,10 +13,13 @@
 local H = dofile(vim.fs.joinpath(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)), "helpers.lua"))
 H.isolate()
 H.rtp()
-local plugin_file = H.root .. "/plugin/markdown-preview.lua"
--- The plugin's entry module, the prefix its commands share and the features
--- its floor module tests beside the version.
-local MODULE = "markdown_preview"
+local plugin_file = H.root .. "/plugin/mdkite.lua"
+-- The plugin's entry module and its name from before the rename, the load
+-- guards a config sets to opt out, the prefix its commands share and the
+-- features its floor module tests beside the version.
+local MODULE = "mdkite"
+local ALIAS = "markdown_preview"
+local GUARDS = { "loaded_mdkite", "loaded_markdown_preview" }
 local COMMAND_PREFIX = "MarkdownPreview"
 local FEATURES = { "uv", "fs.joinpath", "uri_encode" }
 
@@ -147,30 +152,35 @@ end
 
 H.section("Section 1: below the floor")
 H.ok(documented ~= "", "the README's command table lists the commands: " .. documented)
--- A config that sets the load guard has opted out, and an old-Neovim host
--- that shares the config must not be told at every start.
-vim.g.loaded_markdown_preview = 1
-local source_err = source_plugin()
--- lazy.nvim's config still calls setup(), which answers without a word too.
-local quiet_ok, quiet_err = pcall(function()
-	require(MODULE).setup({})
-end)
-turn_loop()
-H.eq(
-	source_err
-		or ("%d notices, commands %q, setup %s"):format(
-			#notices + #refusals,
-			defined(),
-			quiet_ok and "returned" or ("raised " .. tostring(quiet_err))
-		),
-	'0 notices, commands "", setup returned',
-	"a config that opted out hears nothing below the floor, from the plugin file or the module"
-)
--- The opted-out load's notices are read above; the next load counts its own.
-notices = {}
-refusals = {}
+-- A config that sets a load guard has opted out, and an old-Neovim host
+-- that shares the config must not be told at every start; the guard from
+-- before the rename still opts out.
+local source_err
+for _, guard in ipairs(GUARDS) do
+	vim.g[guard] = 1
+	package.loaded[MODULE] = nil
+	source_err = source_plugin()
+	-- lazy.nvim's config still calls setup(), which answers without a word too.
+	local quiet_ok, quiet_err = pcall(function()
+		require(MODULE).setup({})
+	end)
+	turn_loop()
+	H.eq(
+		source_err
+			or ("%d notices, commands %q, setup %s"):format(
+				#notices + #refusals,
+				defined(),
+				quiet_ok and "returned" or ("raised " .. tostring(quiet_err))
+			),
+		'0 notices, commands "", setup returned',
+		"a config that set " .. guard .. " hears nothing below the floor, from the plugin file or the module"
+	)
+	-- The opted-out load's notices are read above; the next load counts its own.
+	notices = {}
+	refusals = {}
+	vim.g[guard] = nil
+end
 package.loaded[MODULE] = nil
-vim.g.loaded_markdown_preview = nil
 source_err = source_plugin()
 local message = require(MODULE .. ".floor").message
 H.ok(message:find("0.10", 1, true) ~= nil, "the floor text names the floor")
@@ -192,7 +202,9 @@ H.eq(#refusals, 0, "the plugin file's load notifies through notify_once alone")
 refusals = {}
 -- A refusal that set the load guard would keep a later source on a
 -- supported Neovim from defining the commands.
-H.eq(vim.g.loaded_markdown_preview, nil, "a refused load leaves the load guard unset")
+for _, guard in ipairs(GUARDS) do
+	H.eq(vim.g[guard], nil, "a refused load leaves " .. guard .. " unset")
+end
 -- A cmd spec runs the command through vim.cmd inside lazy.nvim's handler,
 -- where an ERROR notification on 0.9 raised a traceback, so a refuser's waits
 -- too; every use answers, a second one included.
@@ -248,6 +260,25 @@ for _, notice in ipairs(notices) do
 end
 H.ok(all_floor_text, "both refusals are the floor module's text, so the user sees one notification")
 H.ok(all_errors, "every refusal is an ERROR")
+-- The name from before the rename hands back the stub, and a config that
+-- requires it first hears the floor text alone: its warning follows the
+-- floor check.
+notices = {}
+package.loaded[MODULE] = nil
+local alias_ok, alias = pcall(require, ALIAS)
+turn_loop()
+H.eq(
+	alias_ok and (alias == package.loaded[MODULE] and "the module's table" or "another table")
+		or ("raised " .. tostring(alias)),
+	"the module's table",
+	"require(" .. vim.inspect(ALIAS) .. ") hands back the module's stub below the floor"
+)
+H.eq(
+	#notices == 1 and notices[1].msg or (#notices .. " notices"),
+	message,
+	"require(" .. vim.inspect(ALIAS) .. ") below the floor gives the floor text and no warning"
+)
+H.eq(#refusals, 0, "require(" .. vim.inspect(ALIAS) .. ") below the floor notifies through notify_once alone")
 -- notify_once arrived in 0.7 and a Lua plugin file is sourced from 0.5 on,
 -- so without it each guard shows the text through vim.notify, once.
 vim.notify_once = nil
@@ -291,16 +322,18 @@ H.section("Section 2: at the floor")
 vim.fn.has = real_has
 vim.notify_once = real_once
 vim.notify = real_notify
-vim.g.loaded_markdown_preview = nil
+for _, guard in ipairs(GUARDS) do
+	vim.g[guard] = nil
+end
 -- The refusers go, so every command counted below is the real plugin's.
 for _, name in ipairs(names) do
 	pcall(vim.api.nvim_del_user_command, name)
 end
 -- The stub and the floor module's verdict go with every other module of
--- this plugin and live-server's, and so does the sentinel require leaves for
--- a module that raised while loading.
+-- this plugin, its name from before the rename and live-server's, and so
+-- does the sentinel require leaves for a module that raised while loading.
 for name in pairs(package.loaded) do
-	local plugin = name == MODULE or vim.startswith(name, MODULE .. ".")
+	local plugin = name == MODULE or name == ALIAS or vim.startswith(name, MODULE .. ".")
 	if plugin or name == "live_server" or vim.startswith(name, "live_server.") then
 		package.loaded[name] = nil
 	end
@@ -312,6 +345,17 @@ for _, field in ipairs(FEATURES) do
 		false,
 		"the floor refuses a Neovim without vim." .. field .. ", whatever its version"
 	)
+end
+-- Either load guard opts out on a supported Neovim too.
+for _, guard in ipairs(GUARDS) do
+	vim.g[guard] = 1
+	local skipped_err = source_plugin()
+	H.eq(
+		skipped_err or ("commands %q, module %s"):format(defined(), package.loaded[MODULE] and "loaded" or "unloaded"),
+		'commands "", module unloaded',
+		"a config that set " .. guard .. " gets no command and no module on a supported Neovim"
+	)
+	vim.g[guard] = nil
 end
 -- Under pcall, so a plugin that raises at the floor reds this row and not
 -- the whole suite.
@@ -329,4 +373,29 @@ H.ok(
 		.. (module_ok and "" or (": " .. tostring(module)))
 )
 H.eq(defined(), documented, "every documented command is defined on a supported Neovim, and no other")
+-- The name from before the rename hands back the module's own table, so a
+-- config's setup() reaches the state the commands use, and warns once a
+-- session, naming the plugin: without it vim.deprecate stays silent.
+local warned = {}
+vim.notify = function(msg, level)
+	table.insert(warned, { msg = msg, level = level })
+end
+local first_ok, first = pcall(require, ALIAS)
+package.loaded[ALIAS] = nil
+local again_ok, again = pcall(require, ALIAS)
+vim.notify = real_notify
+H.eq(
+	(first_ok and again_ok) and ((first == module and again == module) and "the module's table" or "another table")
+		or ("raised " .. tostring(first_ok and again or first)),
+	"the module's table",
+	"require(" .. vim.inspect(ALIAS) .. ") hands back the module's own table on a supported Neovim"
+)
+H.eq(#warned, 1, "require(" .. vim.inspect(ALIAS) .. ") warns once a session, a second require included")
+local warning = warned[1] or {}
+H.eq(warning.level, vim.log.levels.WARN, "the warning is a WARN")
+H.ok(
+	(warning.msg or ""):find('use require("mdkite") instead', 1, true) ~= nil
+		and (warning.msg or ""):find("mdkite.nvim", 1, true) ~= nil,
+	"the warning names the module to require and the plugin: " .. tostring(warning.msg)
+)
 H.finish()

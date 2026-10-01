@@ -43,7 +43,7 @@ H.write_file(md, "# doc\n")
 vim.cmd("edit " .. vim.fn.fnameescape(md))
 vim.bo.filetype = "markdown"
 
-local mp = require("markdown_preview")
+local mp = require("mdkite")
 local calls = { start = 0, stop = 0 }
 mp.setup({
 	open_browser = false,
@@ -160,7 +160,7 @@ H.case("Section 1b: a lock that cannot be written leaves no state behind", funct
 	H.defer(function()
 		mp.setup({ instance_mode = "multi", port = 18421 })
 	end)
-	local lock = require("markdown_preview.lock")
+	local lock = require("mdkite.lock")
 	local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
 	local real_write = lock.write
 	-- A real write opens the file before fchmod refuses it.
@@ -194,7 +194,7 @@ local function free_port()
 end
 
 H.case("Section 1c: the start after a failed one arms, serves and opens the browser", function()
-	local util = require("markdown_preview.util")
+	local util = require("mdkite.util")
 	local opened, real_open = 0, util.open_in_browser
 	util.open_in_browser = function()
 		opened = opened + 1
@@ -427,7 +427,7 @@ for _, shape in ipairs({
 end
 
 H.case("Section 1d: a failed start drops a takeover secondary's role", function()
-	local lock = require("markdown_preview.lock")
+	local lock = require("mdkite.lock")
 	local real_read, real_alive = lock.read, lock.is_server_alive
 	H.defer(function()
 		lock.read, lock.is_server_alive = real_read, real_alive
@@ -640,7 +640,7 @@ local function child_primary(path, port)
 		([=[
 vim.opt.runtimepath:prepend(%q)
 vim.opt.runtimepath:prepend(%q)
-local mp = require("markdown_preview")
+local mp = require("mdkite")
 mp.setup({ open_browser = false, instance_mode = "takeover", port = %d })
 vim.cmd("edit " .. vim.fn.fnameescape(%q))
 vim.bo.filetype = "markdown"
@@ -691,7 +691,7 @@ H.case("Section 6: a refused start leaves a running preview's files and lock alo
 	then
 		return
 	end
-	local lock = require("markdown_preview.lock")
+	local lock = require("mdkite.lock")
 	local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
 	H.defer(lock.remove)
 	-- The lock's bytes, or a word that says it is gone.
@@ -984,13 +984,13 @@ end
 -- timer were closed by then (held counts the stub's own open sockets). A
 -- 200 ms bound read a loaded box's 401 as silence once (measured).
 local function secondary_push_notes(port, held)
-	local remote = require("markdown_preview.remote")
+	local remote = require("mdkite.remote")
 	local real_bound = remote.timeout_ms
 	remote.timeout_ms = 500
 	H.defer(function()
 		remote.timeout_ms = real_bound
 	end)
-	local lock = require("markdown_preview.lock")
+	local lock = require("mdkite.lock")
 	local real_read, real_alive = lock.read, lock.is_server_alive
 	H.defer(function()
 		lock.read, lock.is_server_alive = real_read, real_alive
@@ -1095,7 +1095,7 @@ end)
 calls.start, calls.stop = 0, 0
 
 H.case("Section 9: a stop before the deferred browser open leaves nothing to open", function()
-	local util = require("markdown_preview.util")
+	local util = require("mdkite.util")
 	local opened, real_open = 0, util.open_in_browser
 	util.open_in_browser = function()
 		opened = opened + 1
@@ -1142,7 +1142,7 @@ calls.start, calls.stop = 0, 0
 
 -- Makes the next start read a live primary on port until the case ends.
 local function primary_answers_on(port)
-	local lock = require("markdown_preview.lock")
+	local lock = require("mdkite.lock")
 	local real_read, real_alive = lock.read, lock.is_server_alive
 	H.defer(function()
 		lock.read, lock.is_server_alive = real_read, real_alive
@@ -1200,7 +1200,7 @@ calls.start, calls.stop = 0, 0
 
 for _, bad in ipairs({ '"x"', "0", "70000", "8421.5", "-1" }) do
 	H.case("Section 11c: a lock whose port is " .. bad .. " reads as no lock", function()
-		local lock = require("markdown_preview.lock")
+		local lock = require("mdkite.lock")
 		local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
 		vim.fn.mkdir(vim.fs.dirname(lock_file), "p")
 		H.write_file(lock_file, '{"port":' .. bad .. ',"token":"peer","host":"127.0.0.1"}')
@@ -1270,7 +1270,7 @@ end)
 H.case("Section 12b: a refresh after a failed takeover retarget writes the served buffer again", function()
 	takeover_preview_of_first()
 	-- A writer that emptied the file before it raised, as a truncating open does.
-	local util = require("markdown_preview.util")
+	local util = require("mdkite.util")
 	local real_text = util.write_text
 	util.write_text = function(path, text)
 		if text:find("# second", 1, true) then
@@ -1407,7 +1407,7 @@ calls.start, calls.stop = 0, 0
 H.case("Section 7h: a bundled index that cannot be read stops the server with one notice", function()
 	-- The name the plugin reads, as the runtimepath gives it: Windows spells it
 	-- with backslashes, which a suffix match written with a slash never meets.
-	local index = require("markdown_preview.util").resolve_asset("assets/index.html")
+	local index = require("mdkite.util").resolve_asset("assets/index.html")
 	if not index then
 		error("Section 7h: assets/index.html does not resolve", 0)
 	end
@@ -1539,7 +1539,7 @@ H.case("Section 16b: a temporary in a subfolder sits behind the token gate", fun
 end)
 
 H.case("Section 17b: a failed rename and a dangling link", function()
-	local util = require("markdown_preview.util")
+	local util = require("mdkite.util")
 	local dir = H.tmpdir()
 	local function temps()
 		local left = {}
@@ -1617,7 +1617,7 @@ H.case("Section 17b: a failed rename and a dangling link", function()
 end)
 
 H.case("Section 17: a write keeps what its target was", function()
-	local util = require("markdown_preview.util")
+	local util = require("mdkite.util")
 	local dir = H.tmpdir()
 	local function mode(p)
 		local st = vim.uv.fs_stat(p)
@@ -1708,7 +1708,7 @@ for _, shape in ipairs({
 		-- and not listening; a stale lock's holder does not answer the probe, and
 		-- the other shape's lock names a free port, where the real probe is refused.
 		local port = held_port("127.0.0.1")
-		local lock = require("markdown_preview.lock")
+		local lock = require("mdkite.lock")
 		if not shape.other then
 			local real_alive = lock.is_server_alive
 			lock.is_server_alive = function(p, ...)
@@ -1793,7 +1793,7 @@ H.case("Section 11d: a join whose arming raises leaves the primary's content", f
 			auto_refresh_events = { "InsertLeave", "TextChanged", "TextChangedI", "BufWritePost" },
 		})
 	end)
-	local content = vim.fs.joinpath(require("markdown_preview.util").shared_workspace(), "content.md")
+	local content = vim.fs.joinpath(require("mdkite.util").shared_workspace(), "content.md")
 	vim.fn.mkdir(vim.fs.dirname(content), "p")
 	H.write_file(content, "# the primary's text")
 	vim.cmd("buffer " .. first_buf)

@@ -3,7 +3,8 @@
 -- The suite passed against live-server v1.4.0, which has no such route, so
 -- the first check names the feature flag and the rest drive the route; the
 -- plugin's asset_root sidecar, which names the document's directory, stays
--- behind the token.
+-- behind the token. The bundled index resolves from the module's own path
+-- when the runtimepath has no copy.
 --
 -- Run: nvim --headless -u NONE -l "$PWD/tests/asset_route_test.lua"
 
@@ -29,7 +30,7 @@ H.write_file(md, "# pics\n\n![](pic.png)\n")
 vim.cmd("edit " .. vim.fn.fnameescape(md))
 vim.bo.filetype = "markdown"
 
-local mp = require("markdown_preview")
+local mp = require("mdkite")
 mp.setup({ open_browser = false, instance_mode = "multi" })
 mp.start()
 
@@ -71,4 +72,19 @@ H.section("Section 3: the asset_root sidecar is gated")
 H.eq(H.http_get(base .. "/asset_root").status, 401, "the asset_root sidecar without the token is 401")
 
 mp.stop()
+
+H.section("Section 4: the bundled index resolves without the runtimepath")
+-- The runtimepath answers first wherever the checkout is on it, so only a
+-- search that finds nothing reaches the root cut from the module's own
+-- path, where a pattern naming the wrong directory fails no start.
+local real_runtime_file = vim.api.nvim_get_runtime_file
+vim.api.nvim_get_runtime_file = function()
+	return {}
+end
+local found_ok, found = pcall(require("mdkite.util").resolve_asset, "assets/index.html")
+vim.api.nvim_get_runtime_file = real_runtime_file
+H.ok(
+	found_ok and type(found) == "string" and H.same_path(found, H.root .. "/assets/index.html"),
+	"assets/index.html resolves from the module's own path: " .. tostring(found)
+)
 H.finish()

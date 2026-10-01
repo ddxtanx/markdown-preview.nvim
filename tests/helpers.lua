@@ -304,11 +304,11 @@ function H.rtp()
 	-- require can name (the dot reads as a directory): git mergetool leaves
 	-- util.BASE.12345.lua during a conflict, which as a module failed the
 	-- proof and so every suite, for a reason that named no conflict.
-	local modules = { "markdown_preview" }
-	for name, kind in vim.fs.dir(H.root .. "/lua/markdown_preview") do
+	local modules = { "mdkite" }
+	for name, kind in vim.fs.dir(H.root .. "/lua/mdkite") do
 		local base = name:match("^([%w_]+)%.lua$")
 		if kind == "file" and base and base ~= "init" then
-			table.insert(modules, "markdown_preview." .. base)
+			table.insert(modules, "mdkite." .. base)
 		end
 	end
 	-- The first refusal among this plugin's modules, or nil.

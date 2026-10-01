@@ -104,9 +104,9 @@ end
 -- entry file its root proof resolves; returns the copy's path.
 local function tree(root)
 	vim.fn.mkdir(root .. "/tests", "p")
-	vim.fn.mkdir(root .. "/lua/markdown_preview", "p")
+	vim.fn.mkdir(root .. "/lua/mdkite", "p")
 	assert(uv.fs_copyfile(helpers_path, root .. "/tests/helpers.lua"))
-	H.write_file(root .. "/lua/markdown_preview/init.lua", "return {}\n")
+	H.write_file(root .. "/lua/mdkite/init.lua", "return {}\n")
 	return root .. "/tests/helpers.lua"
 end
 
@@ -285,14 +285,14 @@ end)
 fixture("a checkout whose path the runtimepath splits raises, naming the installed copy", ONE, function(msg)
 	local split = base .. "/a,b/mp"
 	local installed_mp = child_data .. "/site/pack/t/start/installed-mp"
-	vim.fn.mkdir(installed_mp .. "/lua/markdown_preview", "p")
-	H.write_file(installed_mp .. "/lua/markdown_preview/init.lua", "return {}\n")
+	vim.fn.mkdir(installed_mp .. "/lua/mdkite", "p")
+	H.write_file(installed_mp .. "/lua/mdkite/init.lua", "return {}\n")
 	code, out = child(tree(split), "H.rtp()", "", { XDG_DATA_HOME = data })
 	eq(
 		ruling(
 			code,
 			out,
-			("the checkout at %s does not resolve: %s/lua/markdown_preview/init.lua"):format(
+			("the checkout at %s does not resolve: %s/lua/mdkite/init.lua"):format(
 				H.canon(split),
 				H.canon(installed_mp)
 			)
@@ -311,14 +311,14 @@ end)
 fixture("a live-server directory that carries this plugin's modules raises, naming them", ONE, function(msg)
 	local dep = base .. "/dep"
 	stub(dep)
-	vim.fn.mkdir(dep .. "/lua/markdown_preview", "p")
-	H.write_file(dep .. "/lua/markdown_preview/init.lua", 'error("DEP COPY OF markdown_preview LOADED")\n')
-	code, out = child(helpers_path, 'H.rtp()\nrequire("markdown_preview")\nH.ok(true, "loaded")\nH.finish()', dep)
+	vim.fn.mkdir(dep .. "/lua/mdkite", "p")
+	H.write_file(dep .. "/lua/mdkite/init.lua", 'error("DEP COPY OF mdkite LOADED")\n')
+	code, out = child(helpers_path, 'H.rtp()\nrequire("mdkite")\nH.ok(true, "loaded")\nH.finish()', dep)
 	eq(
 		ruling(
 			code,
 			out,
-			("child_test.lua:2: the checkout at %s does not resolve: %s/lua/markdown_preview/init.lua (live-server.nvim at %s carries this plugin's modules too)"):format(
+			("child_test.lua:2: the checkout at %s does not resolve: %s/lua/mdkite/init.lua (live-server.nvim at %s carries this plugin's modules too)"):format(
 				H.root,
 				H.canon(dep),
 				H.canon(dep)
@@ -333,7 +333,7 @@ end)
 -- and the live-server directory comes first, so a flat file there, or a
 -- submodule the checkout ships, answered require while a proof of init.lua
 -- alone passed (measured); H.rtp raises before any require runs.
-for _, shadow in ipairs({ "lua/markdown_preview.lua", "lua/markdown_preview/lock/init.lua" }) do
+for _, shadow in ipairs({ "lua/mdkite.lua", "lua/mdkite/lock/init.lua" }) do
 	fixture("a live-server directory carrying " .. shadow .. " raises, naming it", ONE, function(msg)
 		local dep = base .. "/shadow-" .. shadow:gsub("[/.]", "-")
 		stub(dep)
@@ -341,7 +341,7 @@ for _, shadow in ipairs({ "lua/markdown_preview.lua", "lua/markdown_preview/lock
 		H.write_file(dep .. "/" .. shadow, 'error("SHADOW COPY LOADED")\n')
 		code, out = child(
 			helpers_path,
-			'H.rtp()\nrequire("markdown_preview")\nrequire("markdown_preview.lock")\nH.ok(true, "loaded")\nH.finish()',
+			'H.rtp()\nrequire("mdkite")\nrequire("mdkite.lock")\nH.ok(true, "loaded")\nH.finish()',
 			dep
 		)
 		eq(
@@ -430,7 +430,7 @@ stub(plain)
 fixture("a checkout holding a stray dotted Lua file loads", ONE, function(msg)
 	local stray = base .. "/stray/mp"
 	local helpers = tree(stray)
-	H.write_file(stray .. "/lua/markdown_preview/util.BASE.12345.lua", "return {}\n")
+	H.write_file(stray .. "/lua/mdkite/util.BASE.12345.lua", "return {}\n")
 	code, out = child(helpers, 'H.rtp()\nH.ok(true, "loaded")\nH.finish()', plain)
 	eq(ruling(code, out, "Results: 1 passed, 0 failed, 0 skipped"), 0, msg)
 end)

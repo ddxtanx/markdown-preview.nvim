@@ -1,4 +1,4 @@
--- lua/markdown_preview/floor.lua
+-- lua/mdkite/floor.lua
 -- The one statement of the Neovim floor, read by the plugin file and the
 -- module. It loads on any Neovim that sources a Lua plugin file (0.5 on),
 -- so it calls nothing newer, and the version is read first: before 0.8 there

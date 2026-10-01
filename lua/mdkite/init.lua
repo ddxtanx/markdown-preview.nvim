@@ -1,4 +1,4 @@
--- lua/markdown_preview/init.lua
+-- lua/mdkite/init.lua
 -- A config calls setup() whatever the plugin file did (lazy.nvim's config
 -- runs it), so below the floor the module is a stub whose every call
 -- answers an empty string, and it returns before the requires below, whose
@@ -6,11 +6,12 @@
 -- once with the plugin file's (notify_once arrived in 0.7), and it waits for
 -- the loop as the plugin file's does: a lazy load on FileType runs inside
 -- 0.9's filetype nvim_cmd, where an ERROR notification raised Vim(append)
--- with a traceback. A config that set loaded_markdown_preview opted out, and
--- the plugin file says nothing then, so the stub says nothing either.
-local floor = require("markdown_preview.floor")
+-- with a traceback. A config that set loaded_mdkite, or loaded_markdown_preview
+-- from before the rename, opted out, and the plugin file says nothing then,
+-- so the stub says nothing either.
+local floor = require("mdkite.floor")
 if not floor.ok then
-	if not vim.g.loaded_markdown_preview then
+	if not (vim.g.loaded_mdkite or vim.g.loaded_markdown_preview) then
 		vim.schedule(function()
 			local notify = vim.notify_once or vim.notify
 			notify(floor.message, vim.log.levels.ERROR)
@@ -26,12 +27,21 @@ if not floor.ok then
 	})
 end
 
-local ts = require("markdown_preview.ts")
-local util = require("markdown_preview.util")
+local ts = require("mdkite.ts")
+local util = require("mdkite.util")
 local ls_server = require("live_server.server")
 local ls_util = require("live_server.util")
 
 local M = {}
+
+-- The names from before the rename work through the 2.x releases, each
+-- saying once a session what replaced it. Without the plugin argument
+-- vim.deprecate reads the version as Neovim's and stays silent (measured
+-- on 0.12.5); the traceback is left out, a second notification that for a
+-- command names only this plugin's own frames.
+function M._deprecated(name, alternative)
+	vim.deprecate(name, alternative, "3.0.0", "mdkite.nvim", false)
+end
 
 M.config = {
 	port = 0, -- 0 = auto; effective port depends on instance_mode
@@ -523,7 +533,7 @@ local function send_scroll_sync(bufnr)
 		report_push("sync the scroll", pcall(ls_server.send_event, M._server_instance, "scroll", payload))
 	elseif M._takeover_port then
 		local port = M._takeover_port
-		require("markdown_preview.remote").send_event(port, "scroll", payload, M._token, function(sent, cause)
+		require("mdkite.remote").send_event(port, "scroll", payload, M._token, function(sent, cause)
 			if not sent then
 				vim.schedule(function()
 					report_remote("sync the scroll", port, cause)
@@ -662,7 +672,7 @@ local function forget_session()
 	end
 	if M._lock_owned then
 		M._lock_owned = nil
-		require("markdown_preview.lock").remove()
+		require("mdkite.lock").remove()
 	end
 	M._workspace_dir = nil
 	M._last_scroll_line = nil
@@ -728,7 +738,7 @@ function M.start()
 	-- Decide role + token BEFORE writing index.html. The index bakes the
 	-- token in via the __LIVE_TOKEN__ placeholder, so we need it ready.
 	if M.config.instance_mode == "takeover" and not M._server_instance then
-		local lock = require("markdown_preview.lock")
+		local lock = require("mdkite.lock")
 		local lock_data = lock.read()
 		if lock_data and lock.is_server_alive(lock_data.port) then
 			-- Secondary: server is already running in another Neovim
@@ -848,7 +858,7 @@ function M.start()
 					.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.'
 				):format(tostring(port))
 				-- A probe that timed out reads a live primary as gone; its lock still names the port.
-				local lock = require("markdown_preview.lock")
+				local lock = require("mdkite.lock")
 				local held = M.config.instance_mode == "takeover" and lock.read()
 				-- A stale lock names the port too; only a holder that answers a connect gets the hint.
 				if held and held.port == port and lock.is_server_alive(port) then
@@ -867,7 +877,7 @@ function M.start()
 			if M.config.instance_mode == "takeover" then
 				-- Owned from the write on: a write that fails may leave the file it opened.
 				M._lock_owned = true
-				require("markdown_preview.lock").write(inst.port, dir, M._token, M._bound_host)
+				require("mdkite.lock").write(inst.port, dir, M._token, M._bound_host)
 			end
 			-- Armed last, so a failed start leaves no autocmd refreshing nothing.
 			set_autocmds_for_buffer(bufnr)

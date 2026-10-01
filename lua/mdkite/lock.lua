@@ -1,4 +1,4 @@
--- lua/markdown_preview/lock.lua
+-- lua/mdkite/lock.lua
 local uv = vim.uv
 
 local M = {}
