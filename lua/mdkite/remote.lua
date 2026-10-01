@@ -6,8 +6,10 @@ local M = {}
 -- How long a push waits for the primary's status line.
 M.timeout_ms = 2000
 
--- on_done(sent, cause) runs in a luv callback, where most of the API is refused.
-function M.send_event(port, event_type, json_data, token, on_done)
+-- One GET of the server's inject route with params and the token; its
+-- first status line decides, 2xx being sent. on_done(sent, cause) runs in a
+-- luv callback, where most of the API is refused.
+local function inject(port, params, token, timeout_ms, on_done)
 	local tcp, timer
 	local finished = false
 	local function finish(sent, cause)
@@ -36,19 +38,19 @@ function M.send_event(port, event_type, json_data, token, on_done)
 	if not timer then
 		return finish(false, tostring(timer_err))
 	end
-	local armed, arm_err = timer:start(M.timeout_ms, 0, function()
-		finish(false, ("no answer in %d ms"):format(M.timeout_ms))
+	local armed, arm_err = timer:start(timeout_ms, 0, function()
+		finish(false, ("no answer in %d ms"):format(timeout_ms))
 	end)
 	if not armed then
 		return finish(false, tostring(arm_err))
 	end
 
-	local encoded = vim.uri_encode(json_data)
-	local query = string.format("event=%s&data=%s", event_type, encoded)
+	local query = params
 	if token and token ~= "" then
-		query = query .. "&t=" .. vim.uri_encode(token)
+		query = (query ~= "" and (query .. "&") or "") .. "t=" .. vim.uri_encode(token)
 	end
-	local req = string.format("GET /__live/inject?%s HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n", query)
+	local target = "/__live/inject" .. (query ~= "" and ("?" .. query) or "")
+	local req = string.format("GET %s HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n", target)
 	local connecting, connect_err = tcp:connect("127.0.0.1", port, function(err)
 		if err then
 			return finish(false, ("the primary on port %d is gone (%s)"):format(port, tostring(err)))
@@ -92,6 +94,18 @@ function M.send_event(port, event_type, json_data, token, on_done)
 	if not connecting then
 		finish(false, tostring(connect_err))
 	end
+end
+
+function M.send_event(port, event_type, json_data, token, on_done)
+	local params = string.format("event=%s&data=%s", event_type, vim.uri_encode(json_data))
+	inject(port, params, token, M.timeout_ms, on_done)
+end
+
+-- Asks whether the server on port takes token, as a push asks but with no
+-- event: the route then broadcasts nothing, and answers 2xx only past its
+-- token gate, which refuses any other token with 401.
+function M.takes_token(port, token, timeout_ms, on_done)
+	inject(port, "", token, timeout_ms, on_done)
 end
 
 return M

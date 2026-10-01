@@ -51,11 +51,14 @@ function M.read_old()
 end
 
 -- Both releases take port 8421 in takeover, so the server answering on a
--- lock's port may be the other release's: a lock counts only while the
--- process it names runs too. Signal 0 sends nothing; ESRCH says the process
--- is gone, and EPERM that it runs under another account. A lock without a
--- usable pid, or a check that fails another way, leaves the probe alone to
--- decide, as before.
+-- lock's port may be the other release's, and a crashed lock's pid may
+-- name another process by now (a reboot restarts the numbering and the
+-- cache survives it): a lock counts only while the server on its port takes
+-- the lock's own token, which neither release's server takes for the
+-- other's lock. The pid goes first as the check that costs no request:
+-- signal 0 sends nothing, and ESRCH says the process is gone. Success,
+-- EPERM (another account's process), a lock without a usable pid and a
+-- check that fails another way leave the token to decide.
 local function held(lock)
 	local pid = lock.pid
 	if type(pid) == "number" and pid % 1 == 0 and pid >= 1 and pid <= 2147483647 then
@@ -64,12 +67,13 @@ local function held(lock)
 			return false
 		end
 	end
-	return M.is_server_alive(lock.port)
+	return M.is_server_alive(lock.port, lock.token)
 end
 
--- The lock whose holder runs and answers, and whether it is the old one:
--- this release's first, then the old one, so a stale lock under either name
--- counts for nothing. Read and probed through M, where a test replaces them.
+-- The lock whose holder runs and takes its token, and whether it is the old
+-- one: this release's first, then the old one, so a stale lock under either
+-- name counts for nothing. Read and checked through M, where a test
+-- replaces them.
 function M.holder()
 	local current = M.read()
 	if current and held(current) then
@@ -126,28 +130,21 @@ function M.remove()
 	pcall(uv.fs_unlink, lock_path())
 end
 
-function M.is_server_alive(port)
-	local alive = nil
-	local tcp = uv.new_tcp()
-	tcp:connect("127.0.0.1", port, function(err)
-		alive = not err
-		pcall(function()
-			tcp:shutdown()
-		end)
-		pcall(function()
-			tcp:close()
-		end)
+-- How long a start waits to learn whether a lock's holder takes its token,
+-- the bound the connect alone had.
+local CHECK_MS = 500
+
+-- Whether the server on port takes token, asked as a joined preview talks
+-- to its primary; a refusal, any other answer or none in the bound is no.
+function M.is_server_alive(port, token)
+	local taken
+	require("mdkite.remote").takes_token(port, token, CHECK_MS, function(sent)
+		taken = sent
 	end)
-	vim.wait(500, function()
-		return alive ~= nil
+	vim.wait(CHECK_MS, function()
+		return taken ~= nil
 	end, 10)
-	if alive == nil then
-		pcall(function()
-			tcp:close()
-		end)
-		alive = false
-	end
-	return alive
+	return taken == true
 end
 
 return M
