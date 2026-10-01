@@ -52,8 +52,19 @@ local function server_module(name)
 		error(module, 0)
 	end
 end
-local server = server_module("kitehost.server")
-local server_util = server and require("kitehost.util")
+local server, server_util
+-- Looked up at load and again by every start that has none yet: a config
+-- may put kitehost on the runtimepath after this module loaded (an opt
+-- package added after setup()), and the lookup at load alone refused
+-- every start of that session.
+local function find_server()
+	if not server then
+		server = server_module("kitehost.server")
+		server_util = server and require("kitehost.util")
+	end
+	return server
+end
+find_server()
 
 local M = {}
 
@@ -718,7 +729,7 @@ end
 function M.start()
 	-- The two plugins update apart, so an older server is refused before
 	-- any state is made, naming the release this one needs.
-	if not server then
+	if not find_server() then
 		vim.notify(
 			("mdkite: requires kitehost.nvim %s or newer; install or update selimacerbas/kitehost.nvim"):format(
 				KITEHOST_FLOOR

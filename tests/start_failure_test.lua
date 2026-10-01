@@ -2273,8 +2273,10 @@ calls.start, calls.stop = 0, 0
 -- server directory server_dir (nil for none), with XDG directories of its
 -- own, so no start package and no earlier cache answer for it. It requires
 -- the plugin and, when that loads, starts a preview of a Markdown buffer;
--- returns what it reports.
-local function child_without_kitehost(server_dir)
+-- returns what it reports. A late_dir joins the runtimepath after the
+-- plugin loaded and before the start, which runs in multi mode on a port
+-- the OS chooses and is stopped once reported.
+local function child_without_kitehost(server_dir, late_dir)
 	local own = H.tmpdir()
 	local script = vim.fs.joinpath(own, "child.lua")
 	local doc = vim.fs.joinpath(own, "doc.md")
@@ -2282,7 +2284,7 @@ local function child_without_kitehost(server_dir)
 	H.write_file(
 		script,
 		([=[
-local server_dir = %s
+local server_dir, late_dir = %s, %s
 if server_dir then
 	vim.opt.runtimepath:prepend(server_dir)
 end
@@ -2297,19 +2299,35 @@ report.loaded = loaded
 if not loaded then
 	report.err = tostring(mdkite)
 else
-	mdkite.setup({ open_browser = false })
+	if late_dir then
+		vim.opt.runtimepath:append(late_dir)
+		mdkite.setup({ open_browser = false, instance_mode = "multi", port = 0 })
+	else
+		mdkite.setup({ open_browser = false })
+	end
 	vim.cmd("edit " .. vim.fn.fnameescape(%q))
 	vim.bo.filetype = "markdown"
 	local started, err = pcall(mdkite.start)
 	report.raised = not started and tostring(err) or ""
-	report.state = vim.inspect({ mdkite._server_instance, mdkite._token, mdkite._workspace_dir, mdkite._is_primary })
+	report.started = mdkite._server_instance ~= nil
+	report.state = report.started and "(a server runs)"
+		or vim.inspect({ mdkite._server_instance, mdkite._token, mdkite._workspace_dir, mdkite._is_primary })
 	local listed, autocmds = pcall(vim.api.nvim_get_autocmds, { group = "MdKiteAuto" })
 	report.autocmds = listed and #autocmds or 0
 	report.cache = vim.fn.isdirectory(vim.fs.joinpath(vim.fn.stdpath("cache"), "mdkite"))
 	report.older_loaded = package.loaded["live_server.server"] ~= nil or package.loaded["live_server.util"] ~= nil
+	if report.started then
+		report.source = debug.getinfo(package.loaded["kitehost.server"].start, "S").source
+		mdkite.stop()
+	end
 end
 io.stdout:write(vim.json.encode(report) .. "\n")
-]=]):format(server_dir and ("%q"):format(server_dir) or "nil", H.root, doc)
+]=]):format(
+			server_dir and ("%q"):format(server_dir) or "nil",
+			late_dir and ("%q"):format(late_dir) or "nil",
+			H.root,
+			doc
+		)
 	)
 	local env = {}
 	for _, kind in ipairs({ "CONFIG", "DATA", "STATE", "CACHE" }) do
@@ -2368,6 +2386,23 @@ H.case("Section 20b: a kitehost that raises while loading is not read as an olde
 		"with the server's own error: " .. tostring(report.err)
 	)
 	eq(#report.notes, 0, "and no notice names a missing kitehost")
+end)
+
+-- A config may put kitehost on the runtimepath after the plugin loaded
+-- (an opt package added after setup()); the lookup at load alone
+-- refused every start of that session, kitehost installed.
+H.case("Section 20c: a kitehost that joins the runtimepath after the plugin loaded serves", function()
+	local report = child_without_kitehost(nil, ls_dir)
+	eq(report.kitehost, 0, "the child's runtimepath has no kitehost when the plugin loads")
+	eq(report.loaded, true, "the plugin loads: " .. tostring(report.err))
+	eq(report.raised, "", "the start raises nothing")
+	eq(#report.notes, 0, "no notice: " .. vim.inspect(report.notes))
+	eq(report.started, true, "the start finds kitehost and serves")
+	local source = tostring(report.source):gsub("^@", "")
+	ok(
+		source ~= "nil" and H.same_path(source, ls_dir .. "/lua/kitehost/server.lua"),
+		"from the directory that joined: " .. source
+	)
 end)
 
 -- A server whose start returned on a held port served nothing there, so a
