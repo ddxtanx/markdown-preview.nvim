@@ -738,8 +738,21 @@ function M.start()
 	-- token in via the __LIVE_TOKEN__ placeholder, so we need it ready.
 	if M.config.instance_mode == "takeover" and not M._server_instance then
 		local lock = require("mdkite.lock")
-		local lock_data = lock.read()
-		if lock_data and lock.is_server_alive(lock_data.port) then
+		local lock_data, old = lock.holder()
+		if old then
+			-- An older release serves its preview from its own cache
+			-- directory, which this one never writes, so a join could not reach
+			-- it: it is named and left alone, and no start fights it for the port.
+			forget_session()
+			vim.notify(
+				("mdkite: an older release's preview in another Neovim holds port %d: stop it there, then run :MdKite again"):format(
+					lock_data.port
+				),
+				vim.log.levels.ERROR
+			)
+			return
+		end
+		if lock_data then
 			-- Secondary: server is already running in another Neovim
 			-- instance. Adopt its token so our scroll-sync RPC works. The
 			-- primary's bind decides whether its index carries the token; a
@@ -854,10 +867,15 @@ function M.start()
 					.. 'or port = 0 with instance_mode = "multi" for an OS-assigned port.'
 				):format(tostring(port))
 				-- A probe that timed out reads a live primary as gone; its lock still names the port.
-				local lock = require("mdkite.lock")
-				local held = M.config.instance_mode == "takeover" and lock.read()
+				local held, old
+				if M.config.instance_mode == "takeover" then
+					held, old = require("mdkite.lock").holder()
+				end
 				-- A stale lock names the port too; only a holder that answers a connect gets the hint.
-				if held and held.port == port and lock.is_server_alive(port) then
+				if held and held.port == port and old then
+					msg = msg
+						.. " An older release's preview in another Neovim may hold it: stop it there, then run :MdKite again."
+				elseif held and held.port == port then
 					msg = msg .. " Another Neovim's preview may hold it: run :MdKite again to join it."
 				end
 			end

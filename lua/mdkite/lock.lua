@@ -1,14 +1,21 @@
 -- lua/mdkite/lock.lua
 local uv = vim.uv
+local util = require("mdkite.util")
 
 local M = {}
 
 local function lock_path()
+	return vim.fs.joinpath(util.cache_dir(), "server.lock")
+end
+
+-- The lock the releases before the rename keep under their own cache
+-- directory, read through the 2.x releases so a preview one of them runs is
+-- found; nothing here writes or removes it.
+local function old_lock_path()
 	return vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
 end
 
-function M.read()
-	local path = lock_path()
+local function read_at(path)
 	local fd = uv.fs_open(path, "r", 420)
 	if not fd then
 		return nil
@@ -33,6 +40,29 @@ function M.read()
 		return nil
 	end
 	return tbl
+end
+
+function M.read()
+	return read_at(lock_path())
+end
+
+function M.read_old()
+	return read_at(old_lock_path())
+end
+
+-- The lock whose holder answers, and whether it is the old one: this
+-- release's first, then the old one, so a stale lock under either name
+-- counts for nothing. Read and probed through M, where a test replaces them.
+function M.holder()
+	local current = M.read()
+	if current and M.is_server_alive(current.port) then
+		return current, false
+	end
+	local old = M.read_old()
+	if old and M.is_server_alive(old.port) then
+		return old, true
+	end
+	return nil
 end
 
 function M.write(port, workspace, token, host)

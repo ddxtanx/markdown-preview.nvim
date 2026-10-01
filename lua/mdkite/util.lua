@@ -217,17 +217,23 @@ function M.open_in_browser(url, browser)
 	warn("could not open a browser automatically")
 end
 
+---The directory under Neovim's cache that holds the workspaces and the lock.
+---@return string
+function M.cache_dir()
+	return vim.fs.joinpath(vim.fn.stdpath("cache"), "mdkite")
+end
+
 ---Generate a per-buffer workspace directory under Neovim's cache.
 ---@param bufnr integer
 ---@return string
 function M.workspace_for_buffer(bufnr)
 	local name = vim.api.nvim_buf_get_name(bufnr)
 	local hash = vim.fn.sha256(name):sub(1, 12)
-	return vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", hash)
+	return vim.fs.joinpath(M.cache_dir(), hash)
 end
 
 function M.shared_workspace()
-	return vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "shared")
+	return vim.fs.joinpath(M.cache_dir(), "shared")
 end
 
 return M

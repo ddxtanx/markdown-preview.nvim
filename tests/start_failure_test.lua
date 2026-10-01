@@ -161,7 +161,7 @@ H.case("Section 1b: a lock that cannot be written leaves no state behind", funct
 		mp.setup({ instance_mode = "multi", port = 18421 })
 	end)
 	local lock = require("mdkite.lock")
-	local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
+	local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "mdkite", "server.lock")
 	local real_write = lock.write
 	-- A real write opens the file before fchmod refuses it.
 	lock.write = function()
@@ -692,7 +692,7 @@ H.case("Section 6: a refused start leaves a running preview's files and lock alo
 		return
 	end
 	local lock = require("mdkite.lock")
-	local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
+	local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "mdkite", "server.lock")
 	H.defer(lock.remove)
 	-- The lock's bytes, or a word that says it is gone.
 	local function lock_bytes()
@@ -814,11 +814,7 @@ H.case("Section 7b: autocmds that cannot be armed stop the server and remove the
 	one_clean_error(notes, ("mdkite: failed to start server (port %d): "):format(port))
 	eq(mp._server_instance, nil, "no server instance is kept")
 	ok(port_free(port), "the server is stopped: its port binds again")
-	eq(
-		vim.uv.fs_stat(vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")),
-		nil,
-		"no lock is left"
-	)
+	eq(vim.uv.fs_stat(vim.fs.joinpath(vim.fn.stdpath("cache"), "mdkite", "server.lock")), nil, "no lock is left")
 	eq(armed_on(first_buf), 0, "no autocmd is armed")
 end)
 
@@ -1196,7 +1192,7 @@ calls.start, calls.stop = 0, 0
 for _, bad in ipairs({ '"x"', "0", "70000", "8421.5", "-1" }) do
 	H.case("Section 11c: a lock whose port is " .. bad .. " reads as no lock", function()
 		local lock = require("mdkite.lock")
-		local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
+		local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "mdkite", "server.lock")
 		vim.fn.mkdir(vim.fs.dirname(lock_file), "p")
 		H.write_file(lock_file, '{"port":' .. bad .. ',"token":"peer","host":"127.0.0.1"}')
 		H.defer(lock.remove)
@@ -1716,7 +1712,7 @@ for _, shape in ipairs({
 				lock.is_server_alive = real_alive
 			end)
 		end
-		local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
+		local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "mdkite", "server.lock")
 		vim.fn.mkdir(vim.fs.dirname(lock_file), "p")
 		H.write_file(
 			lock_file,
@@ -1795,6 +1791,166 @@ H.case("Section 11d: a join whose arming raises leaves the primary's content", f
 	capture_notes()
 	mp.start()
 	eq(vim.fn.readblob(content), "# the primary's text", "the shared content file holds the primary's text")
+end)
+calls.start, calls.stop = 0, 0
+
+-- The cache directory of the releases before the rename, where an older
+-- Neovim keeps its lock; this release reads that lock and writes nothing.
+local OLDER_CACHE = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview")
+
+-- An older release's lock holding body until the enclosing case ends.
+local function older_lock(body)
+	vim.fn.mkdir(OLDER_CACHE, "p")
+	H.write_file(vim.fs.joinpath(OLDER_CACHE, "server.lock"), vim.json.encode(body))
+	H.defer(function()
+		vim.fn.delete(OLDER_CACHE, "rf")
+	end)
+end
+
+-- Every name under the older cache directory with a file's bytes, so a row
+-- shows nothing was written there.
+local function older_tree()
+	local listed = {}
+	for name, kind in vim.fs.dir(OLDER_CACHE, { depth = 8 }) do
+		local path = vim.fs.joinpath(OLDER_CACHE, name)
+		table.insert(listed, kind == "file" and (name .. "=" .. vim.fn.readblob(path)) or (name .. "/"))
+	end
+	table.sort(listed)
+	return table.concat(listed, "\n")
+end
+
+-- This release's lock, as another Neovim of it writes one, until the case ends.
+local function current_lock(port)
+	local lock = require("mdkite.lock")
+	local path = vim.fs.joinpath(require("mdkite.util").cache_dir(), "server.lock")
+	vim.fn.mkdir(vim.fs.dirname(path), "p")
+	H.write_file(path, vim.json.encode({ port = port, token = "peer", host = "127.0.0.1" }))
+	H.defer(lock.remove)
+end
+
+-- A takeover start on port from the first buffer; the notices it made.
+local function takeover_start(port)
+	mp.setup({ instance_mode = "takeover", port = port })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", port = 18421 })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	local notes = capture_notes()
+	mp.start()
+	H.defer(mp.stop)
+	return notes
+end
+
+H.case("Section 19: the releases before the rename keep their cache directory to themselves", function()
+	-- Every start above wrote its lock and its workspaces, so a path left
+	-- under the older name would have made the directory.
+	eq(vim.fn.isdirectory(OLDER_CACHE), 0, "no start of this release made the older cache directory")
+end)
+
+H.case("Section 19a: an older release's live preview is named, and no start fights it", function()
+	local port = held_port("127.0.0.1")
+	older_lock({ port = port, workspace = "/older/shared", pid = 1, token = "older" })
+	local before = older_tree()
+	local starts = 0
+	local real_start = ls_server.start
+	stub("start", function(...)
+		starts = starts + 1
+		return real_start(...)
+	end)
+	local notes = takeover_start(port)
+	eq(#notes, 1, "one notice")
+	eq(notes[1] and notes[1].level, vim.log.levels.ERROR, "the notice is an error")
+	eq(
+		notes[1] and notes[1].msg,
+		("mdkite: an older release's preview in another Neovim holds port %d: stop it there, then run :MdKite again"):format(
+			port
+		),
+		"the notice names the port the older preview holds"
+	)
+	eq(starts, 0, "no server start fights it for the port")
+	eq(mp._is_primary, nil, "no role is taken")
+	eq(mp._workspace_dir, nil, "no workspace pointer is kept")
+	eq(older_tree(), before, "nothing is written under the older cache directory")
+end)
+calls.start, calls.stop = 0, 0
+
+H.case("Section 19b: an older release's stale lock is ignored and left in place", function()
+	older_lock({ port = free_port(), token = "older" })
+	local before = older_tree()
+	local port = free_port()
+	local notes = takeover_start(port)
+	eq(#notes, 0, "the start says nothing")
+	eq(mp._is_primary, true, "the start serves as the primary")
+	local held = require("mdkite.lock").read()
+	eq(held and held.port, port, "this release's lock names the port the start serves")
+	mp.stop()
+	eq(older_tree(), before, "the older lock is left as it was, through the start and the stop")
+end)
+calls.start, calls.stop = 0, 0
+
+H.case("Section 19c: this release's live holder wins over an older release's", function()
+	older_lock({ port = held_port("127.0.0.1"), token = "older" })
+	local current = held_port("127.0.0.1")
+	current_lock(current)
+	local before = older_tree()
+	local notes = takeover_start(free_port())
+	eq(#notes, 0, "the join says nothing")
+	eq(mp._is_primary, false, "the start joins the preview this release's lock names")
+	eq(mp._takeover_port, current, "on the port this release's lock names")
+	eq(older_tree(), before, "nothing is written under the older cache directory")
+end)
+calls.start, calls.stop = 0, 0
+
+H.case("Section 19d: a stale lock of this release beside an older live preview names the older", function()
+	local older = held_port("127.0.0.1")
+	older_lock({ port = older, token = "older" })
+	current_lock(free_port())
+	local before = older_tree()
+	local notes = takeover_start(free_port())
+	eq(#notes, 1, "one notice")
+	ok(
+		notes[1] ~= nil and notes[1].msg:find(("holds port %d:"):format(older), 1, true) ~= nil,
+		"the notice names the port the older preview holds: " .. tostring(notes[1] and notes[1].msg)
+	)
+	eq(mp._is_primary, nil, "no role is taken")
+	eq(older_tree(), before, "nothing is written under the older cache directory")
+end)
+calls.start, calls.stop = 0, 0
+
+H.case("Section 19e: a held port an older release's preview may hold says so", function()
+	local rows = { "one notice", "the notice says an older release's preview may hold the port" }
+	if skipped_without_raise("19e", rows) then
+		return
+	end
+	local port = held_port("127.0.0.1")
+	older_lock({ port = port, token = "older" })
+	local before = older_tree()
+	-- The first probe times out, as a starved machine's did: the start reads
+	-- the older preview as gone and meets its port held.
+	local lock = require("mdkite.lock")
+	local real_alive = lock.is_server_alive
+	local probes = 0
+	lock.is_server_alive = function(...)
+		probes = probes + 1
+		if probes == 1 then
+			return false
+		end
+		return real_alive(...)
+	end
+	H.defer(function()
+		lock.is_server_alive = real_alive
+	end)
+	local notes = takeover_start(port)
+	eq(#notes, 1, rows[1])
+	ok(
+		notes[1] ~= nil
+			and vim.endswith(
+				notes[1].msg,
+				" An older release's preview in another Neovim may hold it: stop it there, then run :MdKite again."
+			),
+		rows[2] .. ": " .. tostring(notes[1] and notes[1].msg)
+	)
+	eq(older_tree(), before, "nothing is written under the older cache directory")
 end)
 calls.start, calls.stop = 0, 0
 

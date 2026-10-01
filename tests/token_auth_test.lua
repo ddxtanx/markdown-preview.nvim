@@ -58,19 +58,16 @@ ok(
 	"the plugin's workspace sits under the isolated cache: " .. workspace
 )
 ok(
-	not sits_under(
-		vim.fs.joinpath(vim.fn.stdpath("cache"), "..", "escape", "markdown-preview"),
-		vim.fn.stdpath("cache")
-	),
+	not sits_under(vim.fs.joinpath(vim.fn.stdpath("cache"), "..", "escape", "mdkite"), vim.fn.stdpath("cache")),
 	"a workspace that climbs out of the cache with .. does not sit under it"
 )
 ok(
-	not sits_under(vim.fn.stdpath("cache") .. "x/markdown-preview", vim.fn.stdpath("cache")),
+	not sits_under(vim.fn.stdpath("cache") .. "x/mdkite", vim.fn.stdpath("cache")),
 	"a sibling whose name starts with the cache's does not sit under it"
 )
 local written = {}
 for _, cache in ipairs(startup_caches) do
-	local dir = vim.fs.joinpath(cache, "markdown-preview", vim.fs.basename(workspace))
+	local dir = vim.fs.joinpath(cache, "mdkite", vim.fs.basename(workspace))
 	if vim.fn.isdirectory(dir) == 1 then
 		table.insert(written, dir)
 	end
@@ -129,7 +126,7 @@ H.section("Section 3: the lockfile keeps the token private")
 -- private before writing the token.
 local uv = vim.uv
 local lock = require("mdkite.lock")
-local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "markdown-preview", "server.lock")
+local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "mdkite", "server.lock")
 local function mode()
 	local stat = uv.fs_stat(lock_file)
 	return stat and ("%o"):format(stat.mode % 512) or "missing"
