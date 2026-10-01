@@ -52,8 +52,8 @@ local function server_module(name)
 		error(module, 0)
 	end
 end
-local ls_server = server_module("kitehost.server")
-local ls_util = ls_server and require("kitehost.util")
+local server = server_module("kitehost.server")
+local server_util = server and require("kitehost.util")
 
 local M = {}
 
@@ -516,7 +516,7 @@ local function maybe_refresh(bufnr, silent)
 	-- Notify kitehost of the content change for immediate SSE push
 	-- In secondary takeover mode, M._server_instance is nil: fs_watch handles reload
 	if M._server_instance then
-		report_push("reload the preview", pcall(ls_server.reload, M._server_instance, M.config.content_name))
+		report_push("reload the preview", pcall(server.reload, M._server_instance, M.config.content_name))
 	end
 
 	if not silent and M.config.notify_on_refresh then
@@ -553,7 +553,7 @@ local function send_scroll_sync(bufnr)
 	local total = vim.api.nvim_buf_line_count(bufnr)
 	local payload = vim.json.encode({ line = cursor_line - 1, total = total })
 	if M._server_instance then
-		report_push("sync the scroll", pcall(ls_server.send_event, M._server_instance, "scroll", payload))
+		report_push("sync the scroll", pcall(server.send_event, M._server_instance, "scroll", payload))
 	elseif M._takeover_port then
 		local port = M._takeover_port
 		require("mdkite.remote").send_event(port, "scroll", payload, M._token, function(sent, cause)
@@ -630,9 +630,9 @@ local rule_reported = setmetatable({}, { __mode = "k" })
 
 -- A server without the rule reports "::" as written, which shows as its loopback too.
 local function wildcard_loopback(ip)
-	if ls_server.wildcard_loopback then
+	if server.wildcard_loopback then
 		-- A caller may replace the rule; one that raises must not fail a started server.
-		local ruled, loopback = pcall(ls_server.wildcard_loopback, ip)
+		local ruled, loopback = pcall(server.wildcard_loopback, ip)
 		if ruled then
 			return loopback
 		end
@@ -708,7 +708,7 @@ end
 
 -- A server left listening after a failure would serve the preview, token and all.
 local function abandon(inst)
-	pcall(ls_server.stop, inst)
+	pcall(server.stop, inst)
 	if M._server_instance == inst then
 		M._server_instance = nil
 	end
@@ -718,7 +718,7 @@ end
 function M.start()
 	-- The two plugins update apart, so an older server is refused before
 	-- any state is made, naming the release this one needs.
-	if not ls_server then
+	if not server then
 		vim.notify(
 			("mdkite: requires kitehost.nvim %s or newer; install or update selimacerbas/kitehost.nvim"):format(
 				KITEHOST_FLOOR
@@ -728,7 +728,7 @@ function M.start()
 		return
 	end
 	for _, flag in ipairs(REQUIRED_FEATURES) do
-		if not (ls_server.features and ls_server.features[flag]) then
+		if not (server.features and server.features[flag]) then
 			vim.notify(
 				("mdkite: requires kitehost.nvim %s or newer, and the installed one lacks features.%s; update selimacerbas/kitehost.nvim"):format(
 					KITEHOST_FLOOR,
@@ -829,7 +829,7 @@ function M.start()
 	-- Primary path (takeover) or single-instance (multi). Generate a token
 	-- once per server lifetime and reuse it across retargets.
 	if not M._token or M._token == "" then
-		local made, token = pcall(ls_util.random_token, 16)
+		local made, token = pcall(server_util.random_token, 16)
 		if not made then
 			forget_session()
 			vim.notify("mdkite: could not make a session token: " .. tostring(token), vim.log.levels.ERROR)
@@ -858,7 +858,7 @@ function M.start()
 			table.insert(protected, "^/$")
 			table.insert(protected, "^/" .. vim.pesc(M.config.index_name) .. "$")
 		end
-		local ok, inst = pcall(ls_server.start, {
+		local ok, inst = pcall(server.start, {
 			port = port,
 			host = asked_host,
 			root = dir,
@@ -953,7 +953,7 @@ function M.start()
 	else
 		-- Server already running, retarget to this buffer's workspace
 		local index_path = vim.fs.joinpath(dir, M.config.index_name)
-		local retargeted, watching = pcall(ls_server.update_target, M._server_instance, dir, index_path)
+		local retargeted, watching = pcall(server.update_target, M._server_instance, dir, index_path)
 		if not retargeted then
 			-- The server still serves the last workspace, so the preview
 			-- and its autocmds stay with it.
@@ -969,7 +969,7 @@ function M.start()
 			-- Takeover's workspace is the one just written, so the next refresh rewrites it.
 			M._last_text_by_buf = {}
 			local back, back_err =
-				pcall(ls_server.update_target, inst, served_dir, vim.fs.joinpath(served_dir, M.config.index_name))
+				pcall(server.update_target, inst, served_dir, vim.fs.joinpath(served_dir, M.config.index_name))
 			if not back then
 				abandon(inst)
 				vim.notify(
@@ -1001,7 +1001,7 @@ function M.start()
 				vim.log.levels.WARN
 			)
 		end
-		report_push("reload the preview", pcall(ls_server.reload, M._server_instance, M.config.content_name))
+		report_push("reload the preview", pcall(server.reload, M._server_instance, M.config.content_name))
 
 		local url = browser_url(display_host(M._bound_host), inst.port, M._bound_host)
 		if type(M.config.hooks.on_start) == "function" then
@@ -1009,7 +1009,7 @@ function M.start()
 		end
 
 		-- No browser tab connected (user closed it)? Re-open.
-		if M.config.open_browser and ls_server.connected_client_count(inst) == 0 then
+		if M.config.open_browser and server.connected_client_count(inst) == 0 then
 			open_later(url)
 		end
 	end
@@ -1025,7 +1025,7 @@ end
 
 function M.stop()
 	if M._server_instance then
-		pcall(ls_server.stop, M._server_instance)
+		pcall(server.stop, M._server_instance)
 		M._server_instance = nil
 	end
 	forget_session()

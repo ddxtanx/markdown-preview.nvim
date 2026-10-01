@@ -180,7 +180,7 @@ async function openPage() {
 beforeAll(async () => {
   ({ entry: kitehostEntry, real: kitehost } = findKitehost());
   console.log(`kitehost.nvim: ${kitehost}`);
-  work = mkdtempSync(join(tmpdir(), "mp-smoke-"));
+  work = mkdtempSync(join(tmpdir(), "mdkite-smoke-"));
   const md = join(work, "doc.md");
   sock = join(work, "nvim.sock");
   // Files, not pipes: a file can be polled with a deadline and read back
@@ -243,6 +243,18 @@ test("renders the buffer and follows an edit through the plugin's autocmds and S
     await page!.waitForSelector("#content h1", { timeout: 20_000 });
     expect(await page!.textContent("#content h1")).toBe("Smoke");
     expect(await page!.locator("#content p").count()).toBe(1);
+    // The page keeps the token it was handed under its own name, as
+    // kitehost's client keeps kitehost:t, so a refresh finds it there.
+    const token = await within(
+      5_000,
+      "reading the token",
+      page!.evaluate(() => ({
+        baked: document.documentElement.dataset.liveToken ?? "",
+        stored: sessionStorage.getItem("mdkite:t"),
+      })),
+    );
+    expect(token.stored).toMatch(/^[0-9a-f]{32}$/);
+    expect(token.stored).toBe(token.baked);
 
     // The page subscribes only after its first render and never replays a
     // reload it missed, so an edit made before the stream opens is lost.

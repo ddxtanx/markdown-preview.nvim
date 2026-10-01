@@ -939,15 +939,15 @@
             // rewritten by write_index's substitution, turning this guard
             // into token !== token and breaking auth on tab reuse (issue #31).
             if (fromAttr && fromAttr !== '__LIVE' + '_TOKEN__') {
-                try { sessionStorage.setItem('mdp-token', fromAttr); } catch (_) {}
+                try { sessionStorage.setItem('mdkite:t', fromAttr); } catch (_) {}
                 return fromAttr;
             }
             const fromUrl = new URLSearchParams(location.search).get('t');
             if (fromUrl) {
-                try { sessionStorage.setItem('mdp-token', fromUrl); } catch (_) {}
+                try { sessionStorage.setItem('mdkite:t', fromUrl); } catch (_) {}
                 return fromUrl;
             }
-            try { return sessionStorage.getItem('mdp-token') || ''; } catch (_) { return ''; }
+            try { return sessionStorage.getItem('mdkite:t') || ''; } catch (_) { return ''; }
         })();
         const withToken = (url) => {
             if (!LIVE_TOKEN) return url;
@@ -1269,7 +1269,7 @@
                     if (resp.status === 401) {
                         // Stale token (server restarted since this tab loaded).
                         // Evict it so the next load bootstraps fresh.
-                        try { sessionStorage.removeItem('mdp-token'); } catch (_) {}
+                        try { sessionStorage.removeItem('mdkite:t'); } catch (_) {}
                     }
                     return null;
                 }
