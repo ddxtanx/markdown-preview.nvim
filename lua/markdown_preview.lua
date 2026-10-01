@@ -5,6 +5,7 @@
 -- the module's floor notice is all a config hears.
 local mdkite = require("mdkite")
 if require("mdkite.floor").ok then
-	mdkite._deprecated('require("markdown_preview")', 'require("mdkite")')
+	-- lazy.nvim itself calls this setup() for a spec naming the old repository, so the repository is named too.
+	mdkite._deprecated('require("markdown_preview")', 'require("mdkite") from selimacerbas/mdkite.nvim')
 end
 return mdkite

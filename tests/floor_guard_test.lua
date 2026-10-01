@@ -410,7 +410,9 @@ H.eq(
 )
 -- The name from before the rename hands back the module's own table, so a
 -- config's setup() reaches the state the commands use, and warns once a
--- session, naming the plugin: without it vim.deprecate stays silent.
+-- session, naming the plugin: without it vim.deprecate stays silent. The
+-- repository is named beside the module, since lazy.nvim makes that require
+-- itself for a spec that still names the old repository.
 local warned = {}
 vim.notify = function(msg, level)
 	table.insert(warned, { msg = msg, level = level })
@@ -429,8 +431,8 @@ H.eq(#warned, 1, "require(" .. vim.inspect(ALIAS) .. ") warns once a session, a 
 local warning = warned[1] or {}
 H.eq(warning.level, vim.log.levels.WARN, "the warning is a WARN")
 H.ok(
-	(warning.msg or ""):find('use require("mdkite") instead', 1, true) ~= nil
-		and (warning.msg or ""):find("mdkite.nvim", 1, true) ~= nil,
-	"the warning names the module to require and the plugin: " .. tostring(warning.msg)
+	(warning.msg or ""):find('use require("mdkite") from selimacerbas/mdkite.nvim instead', 1, true) ~= nil
+		and (warning.msg or ""):find("removed in mdkite.nvim 3.0.0", 1, true) ~= nil,
+	"the warning names the module, its repository and the plugin: " .. tostring(warning.msg)
 )
 H.finish()
