@@ -14,7 +14,7 @@
 
 local H = dofile(vim.fs.joinpath(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)), "helpers.lua"))
 H.isolate()
-local ls_dir = H.rtp()
+local server_dir = H.rtp()
 local eq, ok = H.eq, H.ok
 
 vim.cmd("source " .. vim.fn.fnameescape(H.root .. "/plugin/mdkite.lua"))
@@ -161,7 +161,7 @@ local inst = mp._server_instance
 io.stdout:write(vim.json.encode({ port = inst and inst.port or 0 }) .. "\n")
 io.stdout:flush()
 vim.wait(30000, function() return false end)
-]=]):format(ls_dir, H.root, port, path)
+]=]):format(server_dir, H.root, port, path)
 	)
 	local said = {}
 	local proc = vim.system({ vim.v.progpath, "--headless", "-u", "NONE", "-l", script }, {

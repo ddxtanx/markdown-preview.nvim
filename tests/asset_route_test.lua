@@ -14,15 +14,15 @@ H.rtp()
 
 local uv = vim.uv
 
-local ls_server = require("kitehost.server")
+local server = require("kitehost.server")
 
 H.section("Section 1: the installed kitehost is at or above the floor")
 -- The route's own flag, and the two a start refuses a server without.
 H.ok(
-	type(ls_server.features) == "table"
-		and ls_server.features.asset_route == true
-		and ls_server.features.host_check == true
-		and ls_server.features.start_raises == true,
+	type(server.features) == "table"
+		and server.features.asset_route == true
+		and server.features.host_check == true
+		and server.features.start_raises == true,
 	("kitehost exports features.asset_route, host_check and start_raises (%s or newer)"):format(H.kitehost_floor)
 )
 

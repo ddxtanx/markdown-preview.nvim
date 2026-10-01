@@ -17,9 +17,9 @@
 
 local H = dofile(vim.fs.joinpath(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)), "helpers.lua"))
 H.isolate()
-local ls_dir = H.rtp()
+local server_dir = H.rtp()
 
-local ls_server = require("kitehost.server")
+local server = require("kitehost.server")
 local eq, ok = H.eq, H.ok
 
 local tmpdir = H.tmpdir()
@@ -66,15 +66,15 @@ end
 -- mp.start() with kitehost's start raising msg; the notifications made.
 local function start_raising(msg)
 	local notes = {}
-	local real_start, real_notify = ls_server.start, vim.notify
-	ls_server.start = function()
+	local real_start, real_notify = server.start, vim.notify
+	server.start = function()
 		error(msg, 0)
 	end
 	vim.notify = function(text, level)
 		table.insert(notes, { msg = text, level = level })
 	end
 	local ran, err = pcall(mp.start)
-	ls_server.start, vim.notify = real_start, real_notify
+	server.start, vim.notify = real_start, real_notify
 	if not ran then
 		error(err, 0)
 	end
@@ -94,12 +94,12 @@ local function capture_notes()
 	return notes
 end
 
--- Replaces ls_server[name] until the enclosing case ends.
+-- Replaces server[name] until the enclosing case ends.
 local function stub(name, fn)
-	local real = ls_server[name]
-	ls_server[name] = fn
+	local real = server[name]
+	server[name] = fn
 	H.defer(function()
-		ls_server[name] = real
+		server[name] = real
 	end)
 end
 
@@ -574,7 +574,7 @@ H.case("Section 5: a restart syncs the line the cursor already holds", function(
 	mp.start()
 	H.defer(mp.stop)
 	local scrolls = 0
-	local real_send = ls_server.send_event
+	local real_send = server.send_event
 	stub("send_event", function(inst, event, data)
 		if event == "scroll" then
 			scrolls = scrolls + 1
@@ -604,7 +604,7 @@ local inst = mp._server_instance
 io.stdout:write(vim.json.encode({ token = mp._token or "", port = inst and inst.port or 0 }) .. "\n")
 io.stdout:flush()
 vim.wait(30000, function() return false end)
-]=]):format(ls_dir, H.root, port, path)
+]=]):format(server_dir, H.root, port, path)
 	)
 	local said = {}
 	local proc = vim.system({ vim.v.progpath, "--headless", "-u", "NONE", "-l", script }, {
@@ -720,13 +720,13 @@ end
 
 H.case("Section 7: a session token that cannot be made fails the start with one notice", function()
 	vim.cmd("buffer " .. first_buf)
-	local ls_util = require("kitehost.util")
-	local real_token = ls_util.random_token
-	ls_util.random_token = function()
+	local server_util = require("kitehost.util")
+	local real_token = server_util.random_token
+	server_util.random_token = function()
 		error("random_token: no secure random source (stubbed)", 2)
 	end
 	H.defer(function()
-		ls_util.random_token = real_token
+		server_util.random_token = real_token
 	end)
 	local notes = capture_notes()
 	local ran, err = pcall(mp.start)
@@ -824,7 +824,7 @@ H.case("Section 7f: a retarget that cannot go back either stops the server", fun
 	local port = mp._server_instance and mp._server_instance.port or 0
 	vim.cmd("buffer " .. second_buf)
 	refuse_write("content.md")
-	local real_update = ls_server.update_target
+	local real_update = server.update_target
 	local retargets = 0
 	stub("update_target", function(...)
 		retargets = retargets + 1
@@ -1290,7 +1290,7 @@ end)
 calls.start, calls.stop = 0, 0
 
 H.case("Section 15: a wildcard rule that raises leaves the URL on the address bound", function()
-	local real_start, real_rule = ls_server.start, ls_server.wildcard_loopback
+	local real_start, real_rule = server.start, server.wildcard_loopback
 	local raising = false
 	-- kitehost's own start reads the rule too; it raises once the server listens.
 	stub("start", function(...)
@@ -1668,7 +1668,7 @@ calls.start, calls.stop = 0, 0
 
 H.case("Section 15b: a wildcard rule that raises is told once per server", function()
 	eq(mp._server_instance, nil, "no server runs before the case")
-	local real_start, real_rule = ls_server.start, ls_server.wildcard_loopback
+	local real_start, real_rule = server.start, server.wildcard_loopback
 	local raising = false
 	stub("start", function(...)
 		local inst = real_start(...)
@@ -1763,9 +1763,9 @@ end
 -- server on its port takes the lock's token, which a bare listener never
 -- answers.
 local function serving(token)
-	local inst = ls_server.start({ port = 0, host = "127.0.0.1", root = H.tmpdir(), token = token })
+	local inst = server.start({ port = 0, host = "127.0.0.1", root = H.tmpdir(), token = token })
 	H.defer(function()
-		pcall(ls_server.stop, inst)
+		pcall(server.stop, inst)
 	end)
 	return inst.port
 end
@@ -1835,7 +1835,7 @@ H.case("Section 19a: an older release's live preview is named, and no start figh
 	older_lock({ port = port, workspace = "/older/shared", pid = vim.fn.getpid(), token = "older" })
 	local before = older_tree()
 	local starts = 0
-	local real_start = ls_server.start
+	local real_start = server.start
 	stub("start", function(...)
 		starts = starts + 1
 		return real_start(...)
@@ -1955,7 +1955,7 @@ for _, crashed in ipairs(CRASHED) do
 		current_lock(port, crashed.pid())
 		local before = older_tree()
 		local starts = 0
-		local real_start = ls_server.start
+		local real_start = server.start
 		stub("start", function(...)
 			starts = starts + 1
 			return real_start(...)
@@ -2087,14 +2087,14 @@ calls.start, calls.stop = 0, 0
 -- request and answers 401, until the case ends; its port and the lines.
 local function recording()
 	local lines = {}
-	local server = assert(vim.uv.new_tcp())
+	local listener = assert(vim.uv.new_tcp())
 	H.defer(function()
-		server:close()
+		listener:close()
 	end)
-	assert(server:bind("127.0.0.1", 0))
-	assert(server:listen(8, function()
+	assert(listener:bind("127.0.0.1", 0))
+	assert(listener:listen(8, function()
 		local client = assert(vim.uv.new_tcp())
-		server:accept(client)
+		listener:accept(client)
 		local head = ""
 		client:read_start(function(err, chunk)
 			if err or not chunk then
@@ -2111,7 +2111,7 @@ local function recording()
 			end
 		end)
 	end))
-	return server:getsockname().port, lines
+	return listener:getsockname().port, lines
 end
 
 H.case("Section 19m: a token carrying & or = stays one query parameter", function()
@@ -2145,14 +2145,14 @@ end)
 -- route takes, which needs its ?, and 404 for any other, read as a file;
 -- its port.
 local function inject_route_only()
-	local server = assert(vim.uv.new_tcp())
+	local listener = assert(vim.uv.new_tcp())
 	H.defer(function()
-		server:close()
+		listener:close()
 	end)
-	assert(server:bind("127.0.0.1", 0))
-	assert(server:listen(8, function()
+	assert(listener:bind("127.0.0.1", 0))
+	assert(listener:listen(8, function()
 		local client = assert(vim.uv.new_tcp())
-		server:accept(client)
+		listener:accept(client)
 		local head = ""
 		client:read_start(function(err, chunk)
 			if err or not chunk then
@@ -2172,7 +2172,7 @@ local function inject_route_only()
 			end
 		end)
 	end))
-	return server:getsockname().port
+	return listener:getsockname().port
 end
 
 H.case("Section 19n: an older preview whose server takes the route only with a ? is named", function()
@@ -2191,13 +2191,13 @@ end)
 calls.start, calls.stop = 0, 0
 
 -- A Neovim whose runtimepath holds this checkout and, ahead of it, the
--- server directory server_dir (nil for none), with XDG directories of its
+-- server directory early_dir (nil for none), with XDG directories of its
 -- own, so no start package and no earlier cache answer for it. It requires
 -- the plugin and, when that loads, starts a preview of a Markdown buffer;
 -- returns what it reports. A late_dir joins the runtimepath after the
 -- plugin loaded and before the start, which runs in multi mode on a port
 -- the OS chooses and is stopped once reported.
-local function child_without_kitehost(server_dir, late_dir)
+local function child_without_kitehost(early_dir, late_dir)
 	local own = H.tmpdir()
 	local script = vim.fs.joinpath(own, "child.lua")
 	local doc = vim.fs.joinpath(own, "doc.md")
@@ -2205,9 +2205,9 @@ local function child_without_kitehost(server_dir, late_dir)
 	H.write_file(
 		script,
 		([=[
-local server_dir, late_dir = %s, %s
-if server_dir then
-	vim.opt.runtimepath:prepend(server_dir)
+local early_dir, late_dir = %s, %s
+if early_dir then
+	vim.opt.runtimepath:prepend(early_dir)
 end
 vim.opt.runtimepath:prepend(%q)
 local notes = {}
@@ -2244,7 +2244,7 @@ else
 end
 io.stdout:write(vim.json.encode(report) .. "\n")
 ]=]):format(
-			server_dir and ("%q"):format(server_dir) or "nil",
+			early_dir and ("%q"):format(early_dir) or "nil",
 			late_dir and ("%q"):format(late_dir) or "nil",
 			H.root,
 			doc
@@ -2313,7 +2313,7 @@ end)
 -- (an opt package added after setup()); the lookup at load alone
 -- refused every start of that session, kitehost installed.
 H.case("Section 20c: a kitehost that joins the runtimepath after the plugin loaded serves", function()
-	local report = child_without_kitehost(nil, ls_dir)
+	local report = child_without_kitehost(nil, server_dir)
 	eq(report.kitehost, 0, "the child's runtimepath has no kitehost when the plugin loads")
 	eq(report.loaded, true, "the plugin loads: " .. tostring(report.err))
 	eq(report.raised, "", "the start raises nothing")
@@ -2321,7 +2321,7 @@ H.case("Section 20c: a kitehost that joins the runtimepath after the plugin load
 	eq(report.started, true, "the start finds kitehost and serves")
 	local source = tostring(report.source):gsub("^@", "")
 	ok(
-		source ~= "nil" and H.same_path(source, ls_dir .. "/lua/kitehost/server.lua"),
+		source ~= "nil" and H.same_path(source, server_dir .. "/lua/kitehost/server.lua"),
 		"from the directory that joined: " .. source
 	)
 end)
@@ -2372,7 +2372,7 @@ for _, shape in ipairs({
 			flags[shape.drop] = nil
 		end
 		stub("features", flags)
-		local starts, real_start = 0, ls_server.start
+		local starts, real_start = 0, server.start
 		stub("start", function(...)
 			starts = starts + 1
 			return real_start(...)
