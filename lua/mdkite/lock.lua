@@ -39,6 +39,11 @@ local function read_at(path)
 	if type(port) ~= "number" or port % 1 ~= 0 or port < 1 or port > 65535 then
 		return nil
 	end
+	-- A token is a string or none: a number, a boolean or JSON's null raised
+	-- in the URI encoding out of the start, and is read as none.
+	if type(tbl.token) ~= "string" or tbl.token == "" then
+		tbl.token = nil
+	end
 	return tbl
 end
 
@@ -130,20 +135,34 @@ function M.remove()
 	pcall(uv.fs_unlink, lock_path())
 end
 
--- How long a start waits to learn whether a lock's holder takes its token,
--- the bound the connect alone had.
+-- How long a start blocks Neovim on one lock: each lock it reads, and the
+-- held-port hint, waits at most this for the holder's answers.
 local CHECK_MS = 500
 
--- Whether the server on port takes token, asked as a joined preview talks
--- to its primary; a refusal, any other answer or none in the bound is no.
+-- Whether the server on port holds a lock carrying token, asked as a joined
+-- preview talks to its primary. A server without a token takes any, so a
+-- lock carrying one counts only when its server takes it and refuses a
+-- request without it with 401: every release that writes a token runs on a
+-- server whose gate covers the route (live-server 1.4.0 on). A lock without
+-- one counts when its server takes a request without one. Both requests
+-- share the bound; a refusal, any other answer or none in time is no.
 function M.is_server_alive(port, token)
-	local taken
-	require("mdkite.remote").takes_token(port, token, CHECK_MS, function(sent)
+	local remote = require("mdkite.remote")
+	local taken, bare
+	remote.takes_token(port, token, CHECK_MS, function(sent)
 		taken = sent
 	end)
+	if token then
+		remote.takes_token(port, nil, CHECK_MS, function(_, _, status)
+			bare = status or false
+		end)
+	end
 	vim.wait(CHECK_MS, function()
-		return taken ~= nil
+		return taken ~= nil and (not token or bare ~= nil)
 	end, 10)
+	if token then
+		return taken == true and bare == "401"
+	end
 	return taken == true
 end
 

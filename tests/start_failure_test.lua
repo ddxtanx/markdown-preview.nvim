@@ -2086,4 +2086,133 @@ for _, crashed in ipairs(CRASHED) do
 	calls.start, calls.stop = 0, 0
 end
 
+-- The releases from 1.7.0 back wrote a lock with no token and ran a server
+-- without one, which takes any token: such a server holds only a lock
+-- without one.
+H.case("Section 19j: an older preview with no token is named", function()
+	local port = serving(nil)
+	older_lock({ port = port, pid = vim.fn.getpid() })
+	local before = older_tree()
+	local notes = takeover_start(port)
+	eq(#notes, 1, "one notice")
+	ok(
+		notes[1] ~= nil and notes[1].msg:find(("holds port %d:"):format(port), 1, true) ~= nil,
+		"the notice names the older preview: " .. tostring(notes[1] and notes[1].msg)
+	)
+	eq(mp._is_primary, nil, "no role is taken")
+	eq(older_tree(), before, "nothing is written under the older cache directory")
+end)
+calls.start, calls.stop = 0, 0
+
+for _, crashed in ipairs(CRASHED) do
+	H.case(
+		"Section 19k: on one port, beside an older preview with no token, a crashed lock with " .. crashed.what,
+		function()
+			local port = serving(nil)
+			older_lock({ port = port, pid = vim.fn.getpid() })
+			current_lock(port, crashed.pid())
+			local notes = takeover_start(port)
+			eq(#notes, 1, "one notice")
+			ok(
+				notes[1] ~= nil and notes[1].msg:find(("holds port %d:"):format(port), 1, true) ~= nil,
+				"the notice names the older preview: " .. tostring(notes[1] and notes[1].msg)
+			)
+			eq(mp._is_primary, nil, "the start joins nothing, the server without a token least of all")
+		end
+	)
+	calls.start, calls.stop = 0, 0
+end
+
+H.case("Section 19l: a lock's token is checked both ways", function()
+	local lock = require("mdkite.lock")
+	local gated, open = serving("peer"), serving(nil)
+	local function reads(port, token)
+		current_lock(port, vim.fn.getpid(), token)
+		local ran, held = pcall(lock.holder)
+		if not ran then
+			return "raised " .. tostring(held)
+		end
+		return held and held.port or "none"
+	end
+	eq(reads(open, "peer"), "none", "a server with no token holds no lock that carries one")
+	eq(reads(open, vim.NIL), open, "a server with no token holds a lock without one")
+	eq(reads(gated, vim.NIL), "none", "a server with a token holds no lock without one")
+	-- A token read from a file that is no string raised in the encoding out
+	-- of the start; it is read as none.
+	for _, token in ipairs({ 12345, true, vim.NIL }) do
+		local name = token == vim.NIL and "null" or tostring(token)
+		eq(reads(gated, token), "none", ("a lock whose token is %s holds nothing on a server with one"):format(name))
+		eq(reads(open, token), open, ("a lock whose token is %s reads as one without"):format(name))
+	end
+	current_lock(open, vim.fn.getpid(), 12345)
+	mp.setup({ instance_mode = "takeover", port = free_port() })
+	H.defer(function()
+		mp.setup({ instance_mode = "multi", port = 18421 })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	capture_notes()
+	local ran, err = pcall(mp.start)
+	H.defer(mp.stop)
+	ok(ran, "a start beside a lock whose token is a number raises nothing: " .. tostring(err))
+	eq(mp._token, nil, "the joined preview keeps no token from that lock")
+end)
+calls.start, calls.stop = 0, 0
+
+-- A listener on a port of its own that keeps the request line of each
+-- request and answers 401, until the case ends; its port and the lines.
+local function recording()
+	local lines = {}
+	local server = assert(vim.uv.new_tcp())
+	H.defer(function()
+		server:close()
+	end)
+	assert(server:bind("127.0.0.1", 0))
+	assert(server:listen(8, function()
+		local client = assert(vim.uv.new_tcp())
+		server:accept(client)
+		local head = ""
+		client:read_start(function(err, chunk)
+			if err or not chunk then
+				return client:close()
+			end
+			head = head .. chunk
+			local line = head:match("^([^\r\n]*)\r\n")
+			if line then
+				table.insert(lines, line)
+				client:read_stop()
+				client:write("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", function()
+					client:close()
+				end)
+			end
+		end)
+	end))
+	return server:getsockname().port, lines
+end
+
+H.case("Section 19m: a token carrying & or = stays one query parameter", function()
+	local token = "a&event=reload"
+	local port, lines = recording()
+	require("mdkite.lock").is_server_alive(port, token)
+	local remote = require("mdkite.remote")
+	local pushed
+	remote.send_event(port, "scroll", "{}", token, function(sent)
+		pushed = sent
+	end)
+	H.wait_for(function()
+		return pushed ~= nil
+	end, 3000)
+	eq(#lines, 3, "the check's two requests and the push reached the listener: " .. table.concat(lines, " | "))
+	local events, encoded = 0, 0
+	for _, line in ipairs(lines) do
+		for _ in line:gmatch("[?&]event=") do
+			events = events + 1
+		end
+		if line:find("[?&]t=a%%26event%%3[dD]reload[ &]") then
+			encoded = encoded + 1
+		end
+	end
+	eq(events, 1, "the push names its own event and the token adds none: " .. table.concat(lines, " | "))
+	eq(encoded, 2, "the token goes escaped in the check and the push: " .. table.concat(lines, " | "))
+end)
+
 H.finish()

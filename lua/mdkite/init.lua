@@ -871,7 +871,7 @@ function M.start()
 				if M.config.instance_mode == "takeover" then
 					held, old = require("mdkite.lock").holder()
 				end
-				-- A stale lock names the port too; only a holder that answers a connect gets the hint.
+				-- A stale lock names the port too; only a holder that takes its lock's token gets the hint.
 				if held and held.port == port and old then
 					msg = msg
 						.. " An older release's preview in another Neovim may hold it: stop it there, then run :MdKite again."
