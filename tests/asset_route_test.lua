@@ -98,8 +98,8 @@ H.ok(
 -- getinfo call resolve_asset makes for its own source.
 local util = require("mdkite.util")
 local real_getinfo = debug.getinfo
-for _, slash in ipairs({ "/", "\\" }) do
-	local source = "@" .. H.root .. slash .. table.concat({ "lua", "mdkite", "util.lua" }, slash)
+-- resolve_asset reading source as its own, with no runtimepath copy.
+local function resolve_from(source)
 	vim.api.nvim_get_runtime_file = function()
 		return {}
 	end
@@ -112,9 +112,17 @@ for _, slash in ipairs({ "/", "\\" }) do
 	local cut_ok, cut = pcall(util.resolve_asset, "assets/index.html")
 	debug.getinfo = real_getinfo
 	vim.api.nvim_get_runtime_file = real_runtime_file
+	return cut_ok, cut
+end
+for _, slash in ipairs({ "/", "\\" }) do
+	local cut_ok, cut = resolve_from("@" .. H.root .. slash .. table.concat({ "lua", "mdkite", "util.lua" }, slash))
 	H.ok(
 		cut_ok and type(cut) == "string" and H.same_path(cut, H.root .. "/assets/index.html"),
 		("a module path whose separator is %s resolves the index from its root: %s"):format(slash, tostring(cut))
 	)
 end
+-- The cut names this module's own place, so a path to another module
+-- under the same root finds none, though the index is there.
+local other_ok, other = resolve_from("@" .. H.root .. "/lua/other/util.lua")
+H.ok(other_ok and other == nil, "a module path outside lua/mdkite finds no root: " .. tostring(other))
 H.finish()

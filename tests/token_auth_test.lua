@@ -108,6 +108,7 @@ ok(r.body:find("hello") ~= nil, "/content.md body contains buffer text")
 -- keeps the page out.
 r = http_get(("http://127.0.0.1:%d/"):format(port), { "Host: rebind.example" })
 eq(r.status, 421, "the index under a foreign Host is 421")
+ok(not r.body:find(mp._token, 1, true), "and its answer carries no token")
 r = http_get(("http://127.0.0.1:%d/content.md?t=%s"):format(port, mp._token), { "Host: rebind.example" })
 eq(r.status, 421, "content.md with the token under a foreign Host is 421")
 r = http_get(("http://127.0.0.1:%d/"):format(port), { "Host: localhost:9999" })
