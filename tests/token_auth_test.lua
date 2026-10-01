@@ -4,7 +4,7 @@
 -- private, and (Section 6) that the preview URL names the address the
 -- server bound and carries the token on any bind but 127.0.0.1. The suite
 -- drives require("mdkite").start() directly, not the
--- :MarkdownPreview user command.
+-- :MdKite user command.
 --
 -- Run: nvim --headless -u NONE -l "$PWD/tests/token_auth_test.lua"
 -- live-server.nvim is found by tests/helpers.lua ($LIVE_SERVER_RTP,

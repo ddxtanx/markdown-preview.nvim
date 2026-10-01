@@ -61,11 +61,12 @@ For **other non-markdown files**, place your cursor inside a fenced ```` ```merm
 
 ## Commands
 
-| Command                  | Description          |
-|--------------------------|----------------------|
-| `:MarkdownPreview`       | Start preview        |
-| `:MarkdownPreviewRefresh`| Force refresh        |
-| `:MarkdownPreviewStop`   | Stop preview         |
+| Command   | Subcommand | Description                                  |
+|-----------|------------|----------------------------------------------|
+| `:MdKite` | `start`    | Start preview (a bare `:MdKite` does this)   |
+| `:MdKite` | `stop`     | Stop preview                                 |
+| `:MdKite` | `refresh`  | Force refresh                                |
+| `:MdKite` | `toggle`   | Start preview, or stop the one running       |
 
 No keymaps are set by default. Map them however you like. Suggested:
 

@@ -990,4 +990,13 @@ function M.stop()
 	end
 end
 
+-- A joined preview runs no server of its own, so its role says it runs.
+function M.toggle()
+	if M._server_instance or M._is_primary == false then
+		M.stop()
+	else
+		M.start()
+	end
+end
+
 return M

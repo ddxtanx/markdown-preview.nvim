@@ -1,6 +1,7 @@
 -- tests/floor_guard_test.lua
--- Below Neovim 0.10 every documented command is a refuser that answers each
--- use with the floor module's text and the module answers a config's
+-- Below Neovim 0.10 every documented command, each of its subcommands and
+-- each command from before the rename is a refuser that answers each use
+-- with the floor module's text and the module answers a config's
 -- setup() without loading the plugin or live-server (one ERROR notification
 -- at load between them), unless the config opted out under either load
 -- guard; on a supported version the commands are defined. The module's name
@@ -15,32 +16,49 @@ H.isolate()
 H.rtp()
 local plugin_file = H.root .. "/plugin/mdkite.lua"
 -- The plugin's entry module and its name from before the rename, the load
--- guards a config sets to opt out, the prefix its commands share and the
--- features its floor module tests beside the version.
+-- guards a config sets to opt out, the commands from before the rename, the
+-- prefixes the commands of both names share and the features its floor
+-- module tests beside the version.
 local MODULE = "mdkite"
 local ALIAS = "markdown_preview"
 local GUARDS = { "loaded_mdkite", "loaded_markdown_preview" }
-local COMMAND_PREFIX = "MarkdownPreview"
+local DEPRECATED = { "MarkdownPreview", "MarkdownPreviewRefresh", "MarkdownPreviewStop" }
+local COMMAND_PREFIXES = { "MdKite", "MarkdownPreview" }
 local FEATURES = { "uv", "fs.joinpath", "uri_encode" }
 
--- The documented commands: the README's command table, sorted.
-local documented = {}
+-- The documented commands, sorted, and each documented subcommand as a
+-- command line: the README's command table, whose rows name the command in
+-- its own backticks and the subcommand in the next column.
+local documented, subcommands = {}, {}
 for line in io.lines(H.root .. "/README.md") do
 	local name = line:match("^| `:(%w+)`")
-	if name then
+	if name and not vim.tbl_contains(documented, name) then
 		table.insert(documented, name)
 	end
+	local sub = line:match("^| `:%w+`%s*|%s*`([%w-]+)`")
+	if sub then
+		table.insert(subcommands, name .. " " .. sub)
+	end
 end
+-- Every command the plugin defines: the documented ones and, through the
+-- 2.x releases, the ones from before the rename, refused below the floor
+-- as the documented ones are.
+local commands = vim.list_extend(vim.deepcopy(documented), DEPRECATED)
 table.sort(documented)
+table.sort(commands)
 documented = table.concat(documented, " ")
+commands = table.concat(commands, " ")
 
--- The plugin's commands Neovim has, by the shared prefix, sorted: a set
--- equal to the README's is every documented command and no other.
+-- The plugin's commands Neovim has, by the prefixes, sorted: a set equal to
+-- the one above is every command the plugin defines and no other.
 local function defined()
 	local names = {}
 	for name in pairs(vim.api.nvim_get_commands({})) do
-		if vim.startswith(name, COMMAND_PREFIX) then
-			table.insert(names, name)
+		for _, prefix in ipairs(COMMAND_PREFIXES) do
+			if vim.startswith(name, prefix) then
+				table.insert(names, name)
+				break
+			end
 		end
 	end
 	table.sort(names)
@@ -152,6 +170,7 @@ end
 
 H.section("Section 1: below the floor")
 H.ok(documented ~= "", "the README's command table lists the commands: " .. documented)
+H.ok(#subcommands > 0, "the README's command table lists the subcommands: " .. table.concat(subcommands, ", "))
 -- A config that sets a load guard has opted out, and an old-Neovim host
 -- that shares the config must not be told at every start; the guard from
 -- before the rename still opts out.
@@ -185,8 +204,13 @@ source_err = source_plugin()
 local message = require(MODULE .. ".floor").message
 H.ok(message:find("0.10", 1, true) ~= nil, "the floor text names the floor")
 -- lazy.nvim's cmd and keys specs run the command they were given, so each
--- documented one exists below the floor to say why.
-H.eq(source_err or defined(), documented, "every documented command is defined below the floor, and no other")
+-- documented one, and each from before the rename, exists below the floor
+-- to say why.
+H.eq(
+	source_err or defined(),
+	commands,
+	"every documented command and every one from before the rename is defined below the floor, and no other"
+)
 -- lazy.nvim sources plugin files with :source, where an ERROR notification
 -- on 0.9 raised a Vim(source) exception, so the refusal waits for the source
 -- to return and shows once the loop turns.
@@ -207,17 +231,24 @@ for _, guard in ipairs(GUARDS) do
 end
 -- A cmd spec runs the command through vim.cmd inside lazy.nvim's handler,
 -- where an ERROR notification on 0.9 raised a traceback, so a refuser's waits
--- too; every use answers, a second one included.
-local names = vim.split(documented, " ")
+-- too; every use answers, a second one and one naming a subcommand included.
+local names = vim.split(commands, " ")
 -- Under pcall, so a command that is missing reds its own rows below and not
 -- the whole suite.
 for _, name in ipairs(names) do
 	pcall(vim.cmd, name)
 end
+for _, line in ipairs(subcommands) do
+	pcall(vim.cmd, line)
+end
 H.eq(#refusals, 0, "a refuser's answer waits until the command returns")
 pcall(vim.cmd, names[1])
 turn_loop()
-H.eq(#refusals, #names + 1, "every documented command answers each use below the floor")
+H.eq(
+	#refusals,
+	#names + #subcommands + 1,
+	"every command, each documented subcommand included, answers each use below the floor"
+)
 local refused_right = #refusals > 0
 for _, refusal in ipairs(refusals) do
 	refused_right = refused_right and refusal.msg == message and refusal.level == vim.log.levels.ERROR
@@ -372,7 +403,11 @@ H.ok(
 	"the plugin's own modules and live-server's load on a supported Neovim"
 		.. (module_ok and "" or (": " .. tostring(module)))
 )
-H.eq(defined(), documented, "every documented command is defined on a supported Neovim, and no other")
+H.eq(
+	defined(),
+	commands,
+	"every command, the ones from before the rename included, is defined on a supported Neovim, and no other"
+)
 -- The name from before the rename hands back the module's own table, so a
 -- config's setup() reaches the state the commands use, and warns once a
 -- session, naming the plugin: without it vim.deprecate stays silent.
