@@ -42,7 +42,7 @@ local function dispatched(cmdline)
 		mp[name] = fn
 	end
 	if not ran then
-		error(cmdline .. " raised: " .. tostring(err), 0)
+		error(vim.inspect(cmdline) .. " raised: " .. tostring(err), 0)
 	end
 	return table.concat(called, " "), notes
 end
@@ -65,12 +65,14 @@ H.case("Section 2: an unknown subcommand, or an argument after one, is one error
 		{ "MdKite no\1pe", "mdkite: no subcommand no?pe; the subcommands are start, stop, refresh, toggle" },
 	}) do
 		local cmdline, want = case[1], case[2]
+		-- Quoted and escaped, so a control character in a line never reaches the output raw.
+		local label = vim.inspect(cmdline)
 		local called, notes = dispatched(cmdline)
-		eq(called, "", cmdline .. " runs nothing")
-		eq(#notes, 1, cmdline .. " gives one notice")
+		eq(called, "", label .. " runs nothing")
+		eq(#notes, 1, label .. " gives one notice")
 		local note = notes[1] or {}
-		eq(note.level, vim.log.levels.ERROR, cmdline .. " gives an error")
-		eq(note.msg, want, cmdline .. " says what was wrong")
+		eq(note.level, vim.log.levels.ERROR, label .. " gives an error")
+		eq(note.msg, want, label .. " says what was wrong")
 	end
 end)
 
