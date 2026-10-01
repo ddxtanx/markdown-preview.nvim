@@ -267,10 +267,6 @@ H.section("Section 6: the preview URL")
 -- Every row reads the URL on_start receives: its host is the address the
 -- server bound as a browser reaches it, and the token rides along on any
 -- bind but 127.0.0.1, whose index carries it.
--- A server that binds localhost as 127.0.0.1 and reports the
--- address canonical; start_raises arrived with them.
-local ls_features = require("kitehost.server").features
-local newer_server = ls_features ~= nil and ls_features.start_raises == true
 -- The URL on_start receives for a start on host; "" when none came.
 local function url_for(host)
 	local url
@@ -306,20 +302,12 @@ if v6 then
 		any_url:match("^http://%[::1%]:%d+/%?t=%x+$") ~= nil,
 		"an IPv6 wildcard bind yields http://[::1]:<port>/?t=<token>: " .. any_url
 	)
-	-- Any spelling of the wildcard is bound as "::", so it opens [::1] too;
-	-- a server without start_raises reported the spelling it was given.
-	if newer_server then
-		local long_url = url_for("0:0:0:0:0:0:0:0")
-		ok(
-			long_url:match("^http://%[::1%]:%d+/%?t=%x+$") ~= nil,
-			"a 0:0:0:0:0:0:0:0 bind yields http://[::1]:<port>/?t=<token>: " .. long_url
-		)
-	else
-		H.skip(
-			"a 0:0:0:0:0:0:0:0 bind yields http://[::1]:<port>/?t=<token>"
-				.. " (this server lacks features.start_raises: it reports the address as written)"
-		)
-	end
+	-- Any spelling of the wildcard is bound as "::", so it opens [::1] too.
+	local long_url = url_for("0:0:0:0:0:0:0:0")
+	ok(
+		long_url:match("^http://%[::1%]:%d+/%?t=%x+$") ~= nil,
+		"a 0:0:0:0:0:0:0:0 bind yields http://[::1]:<port>/?t=<token>: " .. long_url
+	)
 	-- The loopback set stays 127.0.0.1 and localhost, the address takeover talks to.
 	mp.setup({ open_browser = false, instance_mode = "multi", port = 0, host = "::1" })
 	mp.start()

@@ -10,8 +10,8 @@
 -- Sections 6 to 9: a refused start leaves a running primary's files and
 -- lock alone, a raise after the server started stops it with one notice,
 -- a secondary's refused push is told once, and a deferred browser open
--- survives a stop. Rows that need kitehost's start raise skip without
--- it; takeover's host rule closes the file.
+-- survives a stop. A start refuses a kitehost without the raise, so no
+-- row skips for it; takeover's host rule closes the file.
 --
 -- Run: nvim --headless -u NONE -l tests/start_failure_test.lua
 
@@ -21,21 +21,6 @@ local ls_dir = H.rtp()
 
 local ls_server = require("kitehost.server")
 local eq, ok = H.eq, H.ok
-
--- A server without start_raises returned from a start on a held
--- port with a server that served nothing, so the rows that need its
--- refusal are skipped there, one skip per row, named with its case so
--- each reads apart. True when they were.
-local function skipped_without_raise(case, rows, why)
-	if ls_server.features and ls_server.features.start_raises then
-		return false
-	end
-	why = why or "a start on a held port returns"
-	for _, row in ipairs(rows) do
-		H.skip(("%s: %s (this server lacks features.start_raises: %s)"):format(case, row, why))
-	end
-	return true
-end
 
 local tmpdir = H.tmpdir()
 local md = vim.fs.joinpath(tmpdir, "doc.md")
@@ -323,15 +308,6 @@ end)
 
 for _, holder in ipairs({ "this process", "another process" }) do
 	H.case("Section 1c5: the default takeover port, held by " .. holder .. ", is named with its fix", function()
-		if
-			skipped_without_raise("1c5, held by " .. holder, {
-				"one notice for the failed start",
-				"the notice names the port the start asked for",
-				"no server instance is kept",
-			})
-		then
-			return
-		end
 		if holder == "another process" then
 			local said = child_holding("127.0.0.1", 8421)
 			ok(
@@ -372,21 +348,10 @@ H.case("Section 1c6: a host spelled like the error name keeps the generic notice
 	-- double quotes kitehost puts around a refused value, and no port-in-use
 	-- hint from this plugin. The host carries the colon so a detection keyed on
 	-- the error name with its colon is caught too.
-	if
-		not skipped_without_raise("1c6", {
-			"the notice is the generic one",
-			"the notice carries the host kitehost refused",
-			"the notice carries no port-in-use hint",
-		})
-	then
-		local msg = tostring(notes[1] and notes[1].msg)
-		ok(
-			vim.startswith(msg, "mdkite: failed to start server (port 18421): "),
-			"the notice is the generic one: " .. msg
-		)
-		ok(msg:find('"EADDRINUSE:"', 1, true) ~= nil, "the notice carries the host kitehost refused: " .. msg)
-		ok(msg:find("is in use by another program", 1, true) == nil, "the notice carries no port-in-use hint: " .. msg)
-	end
+	local msg = tostring(notes[1] and notes[1].msg)
+	ok(vim.startswith(msg, "mdkite: failed to start server (port 18421): "), "the notice is the generic one: " .. msg)
+	ok(msg:find('"EADDRINUSE:"', 1, true) ~= nil, "the notice carries the host kitehost refused: " .. msg)
+	ok(msg:find("is in use by another program", 1, true) == nil, "the notice carries no port-in-use hint: " .. msg)
 	eq(mp._server_instance, nil, "no server instance is kept")
 end)
 
@@ -396,16 +361,6 @@ for _, shape in ipairs({
 	{ held = "127.0.0.1", host = "0.0.0.0", what = "the loopback address a wildcard start names" },
 }) do
 	H.case("Section 1c3: a port held on " .. shape.what .. " is named with its fix", function()
-		if
-			skipped_without_raise("1c3, held on " .. shape.what, {
-				"one notice for the failed start",
-				"the notice is an error",
-				"the notice names the port and the settings that avoid it",
-				"no server instance is kept",
-			})
-		then
-			return
-		end
 		local port = held_port(shape.held)
 		mp.setup({ host = shape.host, port = port })
 		H.defer(function()
@@ -677,20 +632,6 @@ vim.wait(30000, function() return false end)
 end
 
 H.case("Section 6: a refused start leaves a running preview's files and lock alone", function()
-	if
-		skipped_without_raise("6", {
-			"the primary's lock holds its token",
-			"one notice for the refused start",
-			"the notice says another Neovim's preview may hold the port",
-			"no server instance is kept",
-			"the primary still serves its own buffer",
-			"the primary's index still bakes the primary's token",
-			"the refused start leaves the primary's lock",
-			"a stop after the refused start leaves the primary's lock",
-		})
-	then
-		return
-	end
 	local lock = require("mdkite.lock")
 	local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "mdkite", "server.lock")
 	H.defer(lock.remove)
@@ -1488,29 +1429,19 @@ H.case("Section 16: a write's temporary file is never served", function()
 	end
 	ok(name ~= "none", "the content's held temporary is present: " .. table.concat(temps, ", "))
 	eq(vim.fn.readblob(vim.fs.joinpath(ws, name)), "# the held write", "it holds the new text")
-	-- The dot rule that refuses and leaves unwatched a dot-named file arrived with start_raises.
-	local rows = { "it answers 404 without the token", "it answers 404 with the token", "no reload frame names it" }
-	if not skipped_without_raise("16", rows, "it serves and watches dot-named files") then
-		eq(H.http_get(("http://127.0.0.1:%d/%s"):format(port, name)).status, 404, rows[1])
-		eq(H.http_get(("http://127.0.0.1:%d/%s?t=%s"):format(port, name, token)).status, 404, rows[2])
-		ok(not frames:find(".tmp", 1, true), rows[3] .. ": " .. frames:gsub("\r?\n", " | "))
-	end
-	-- Without the dot rule the plugin's own gate refuses it; with the rule, 404 comes first.
-	local gated = "it answers 401 without the token on a server without the dot rule"
-	if ls_server.features and ls_server.features.start_raises then
-		H.skip("16: " .. gated .. " (this server's dot rule answers 404 first)")
-	else
-		eq(H.http_get(("http://127.0.0.1:%d/%s"):format(port, name)).status, 401, gated)
-	end
+	-- kitehost's dot rule refuses a dot-named file and leaves it unwatched.
+	eq(H.http_get(("http://127.0.0.1:%d/%s"):format(port, name)).status, 404, "it answers 404 without the token")
+	eq(
+		H.http_get(("http://127.0.0.1:%d/%s?t=%s"):format(port, name, token)).status,
+		404,
+		"it answers 404 with the token"
+	)
+	ok(not frames:find(".tmp", 1, true), "no reload frame names it: " .. frames:gsub("\r?\n", " | "))
 end)
 calls.start, calls.stop = 0, 0
 
-H.case("Section 16b: a temporary in a subfolder sits behind the token gate", function()
-	local row = "a subfolder's temporary answers 401 without the token on a server without the dot rule"
-	if ls_server.features and ls_server.features.start_raises then
-		H.skip("16b: " .. row .. " (this server's dot rule answers 404 first)")
-		return
-	end
+-- The plugin leaves a temporary at any depth to the dot rule.
+H.case("Section 16b: a temporary in a subfolder is never served", function()
 	mp.setup({ port = free_port() })
 	H.defer(function()
 		mp.setup({ port = 18421 })
@@ -1525,8 +1456,10 @@ H.case("Section 16b: a temporary in a subfolder sits behind the token gate", fun
 	H.defer(function()
 		vim.fn.delete(sub, "rf")
 	end)
-	local port = mp._server_instance and mp._server_instance.port or 0
-	eq(H.http_get(("http://127.0.0.1:%d/sub/.content.md.4242.tmp"):format(port)).status, 401, row)
+	local port, token = mp._server_instance and mp._server_instance.port or 0, mp._token or ""
+	local path = ("http://127.0.0.1:%d/sub/.content.md.4242.tmp"):format(port)
+	eq(H.http_get(path).status, 404, "a subfolder's temporary answers 404 without the token")
+	eq(H.http_get(path .. "?t=" .. token).status, 404, "and with the token")
 end)
 
 H.case("Section 17b: a failed rename and a dangling link", function()
@@ -1690,10 +1623,6 @@ for _, shape in ipairs({
 	{ what = "a lock whose holder does not answer", other = false },
 }) do
 	H.case("Section 18: a held port with " .. shape.what .. " gets the plain notice", function()
-		local rows = { "one notice for the refused start", "the notice carries no hint" }
-		if skipped_without_raise("18, " .. shape.what, rows) then
-			return
-		end
 		-- A listener holds the port on every OS, since Linux lets a SO_REUSEADDR
 		-- bind (libuv makes one on every Unix TCP bind) share a port held bound
 		-- and not listening; a stale lock's holder does not answer the probe, and
@@ -1727,11 +1656,11 @@ for _, shape in ipairs({
 		local notes = capture_notes()
 		mp.start()
 		H.defer(mp.stop)
-		eq(#notes, 1, rows[1])
+		eq(#notes, 1, "one notice for the refused start")
 		ok(
 			notes[1] ~= nil
 				and vim.endswith(notes[1].msg, 'or port = 0 with instance_mode = "multi" for an OS-assigned port.'),
-			rows[2] .. ": " .. tostring(notes[1] and notes[1].msg)
+			"the notice carries no hint: " .. tostring(notes[1] and notes[1].msg)
 		)
 	end)
 end
@@ -1972,24 +1901,20 @@ end)
 calls.start, calls.stop = 0, 0
 
 H.case("Section 19e: a held port an older release's preview may hold says so", function()
-	local rows = { "one notice", "the notice says an older release's preview may hold the port" }
-	if skipped_without_raise("19e", rows) then
-		return
-	end
 	local port = serving("older")
 	older_lock({ port = port, token = "older" })
 	local before = older_tree()
 	-- The start reads the older preview as gone and meets its port held.
 	first_check_times_out()
 	local notes = takeover_start(port)
-	eq(#notes, 1, rows[1])
+	eq(#notes, 1, "one notice")
 	ok(
 		notes[1] ~= nil
 			and vim.endswith(
 				notes[1].msg,
 				" An older release's preview in another Neovim may hold it: stop it there, then run :MdKite again."
 			),
-		rows[2] .. ": " .. tostring(notes[1] and notes[1].msg)
+		"the notice says an older release's preview may hold the port: " .. tostring(notes[1] and notes[1].msg)
 	)
 	eq(older_tree(), before, "nothing is written under the older cache directory")
 end)
@@ -2065,22 +1990,18 @@ for _, crashed in ipairs(CRASHED) do
 	calls.start, calls.stop = 0, 0
 
 	H.case("Section 19i: a timed-out check beside an older crashed lock with " .. crashed.what, function()
-		local rows = { "one notice", "the notice offers the join, naming no older release" }
-		if skipped_without_raise("19i, " .. crashed.what, rows) then
-			return
-		end
 		local port = serving("peer")
 		older_lock({ port = port, pid = crashed.pid(), token = "older" })
 		current_lock(port, vim.fn.getpid())
 		-- The start reads this release's holder as gone and meets its port held.
 		first_check_times_out()
 		local notes = takeover_start(port)
-		eq(#notes, 1, rows[1])
+		eq(#notes, 1, "one notice")
 		ok(
 			notes[1] ~= nil
 				and not notes[1].msg:find("older release", 1, true)
 				and vim.endswith(notes[1].msg, " Another Neovim's preview may hold it: run :MdKite again to join it."),
-			rows[2] .. ": " .. tostring(notes[1] and notes[1].msg)
+			"the notice offers the join, naming no older release: " .. tostring(notes[1] and notes[1].msg)
 		)
 	end)
 	calls.start, calls.stop = 0, 0
