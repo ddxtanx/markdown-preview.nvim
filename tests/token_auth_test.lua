@@ -345,20 +345,15 @@ end
 -- a network bind's page has no other source.
 local loop_url = url_for("127.0.0.1")
 ok(loop_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil, "a loopback bind's URL has no ?t=: " .. loop_url)
--- localhost binds 127.0.0.1, and a browser tries localhost's ::1 first,
--- where another program may listen, so the URL names the address bound.
-if newer_server then
-	local localhost_url = url_for("localhost")
-	ok(
-		localhost_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil,
-		"a localhost bind opens 127.0.0.1 with no ?t=: " .. localhost_url
-	)
-else
-	H.skip(
-		"a localhost bind opens 127.0.0.1 with no ?t="
-			.. " (this server lacks features.start_raises: it cannot bind localhost)"
-	)
-end
+-- libuv binds IP literals only, and the floor binds localhost as
+-- 127.0.0.1, where a server before it raised; a browser tries
+-- localhost's ::1 first, where another program may listen, so the URL
+-- names the address bound.
+local localhost_url = url_for("localhost")
+ok(
+	localhost_url:match("^http://127%.0%.0%.1:%d+/$") ~= nil,
+	"a localhost bind opens 127.0.0.1 with no ?t=: " .. localhost_url
+)
 local net_url = url_for("0.0.0.0")
 ok(net_url:find("?t=", 1, true) ~= nil, "a network bind's URL keeps ?t=: " .. net_url)
 -- An IPv4-mapped bind is named by its IPv4 address, and it is no 127.0.0.1

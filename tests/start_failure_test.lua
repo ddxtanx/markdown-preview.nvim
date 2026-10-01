@@ -2370,4 +2370,25 @@ H.case("Section 20b: a kitehost that raises while loading is not read as an olde
 	eq(#report.notes, 0, "and no notice names a missing kitehost")
 end)
 
+-- A server whose start returned on a held port served nothing there, so a
+-- takeover start wrote a lock naming the other program's port and handed
+-- that program the URL; the floor's start raises, so neither happens.
+H.case("Section 21: a port another program holds, end to end in takeover mode", function()
+	local lock_file = vim.fs.joinpath(vim.fn.stdpath("cache"), "mdkite", "server.lock")
+	eq(vim.uv.fs_stat(lock_file), nil, "no lock before the start")
+	local started = calls.start
+	local port = held_port("127.0.0.1")
+	local notes = takeover_start(port)
+	eq(#notes, 1, "one notification")
+	ok(
+		notes[1] ~= nil and notes[1].msg:find(("port %d is in use"):format(port), 1, true) ~= nil,
+		"naming the held port: " .. tostring(notes[1] and notes[1].msg)
+	)
+	eq(mp._server_instance, nil, "no server instance is kept")
+	eq(vim.uv.fs_stat(lock_file), nil, "no lock names the other program's port")
+	eq(calls.start, started, "on_start is not called")
+	eq(armed(), 0, "no autocmd is armed")
+	eq(mp._token, nil, "no token is kept")
+end)
+
 H.finish()
