@@ -61,6 +61,8 @@ H.case("Section 2: an unknown subcommand, or an argument after one, is one error
 		{ "MdKite nope", "mdkite: no subcommand nope; the subcommands are start, stop, refresh, toggle" },
 		{ "MdKite nope extra", "mdkite: no subcommand nope; the subcommands are start, stop, refresh, toggle" },
 		{ "MdKite start extra", "mdkite: start takes no arguments" },
+		-- A control character typed into the name is shown as ?, so the notice stays one clean line.
+		{ "MdKite no\1pe", "mdkite: no subcommand no?pe; the subcommands are start, stop, refresh, toggle" },
 	}) do
 		local cmdline, want = case[1], case[2]
 		local called, notes = dispatched(cmdline)
