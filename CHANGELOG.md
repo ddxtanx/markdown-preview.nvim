@@ -4,6 +4,8 @@ All notable changes to this project; versions follow SemVer. From `[Unreleased]`
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-02
+
 ### Upgrading from markdown-preview.nvim
 
 The plugin is mdkite.nvim from this release, and the server it runs on is kitehost.nvim, live-server.nvim's name from its v2.0.0, which this release requires. Through 2.x the former lazy.nvim spec still installs it, since GitHub redirects the repository's former name; the former module and commands still work, each warning once a session and naming its replacement, and the former opt-out global still opts out. All three are removed in 3.0.0. Everything else in the table takes the new name now.
@@ -266,7 +268,8 @@ Complete rewrite from `mermaid-playground.nvim` to `markdown-preview.nvim`.
 }
 ```
 
-[Unreleased]: https://github.com/selimacerbas/mdkite.nvim/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/selimacerbas/mdkite.nvim/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/selimacerbas/mdkite.nvim/releases/tag/v2.0.0
 [1.10.0]: https://github.com/selimacerbas/markdown-preview.nvim/releases/tag/v1.10.0
 [1.9.0]: https://github.com/selimacerbas/markdown-preview.nvim/releases/tag/v1.9.0
 [1.8.0]: https://github.com/selimacerbas/markdown-preview.nvim/releases/tag/v1.8.0
