@@ -7,10 +7,11 @@
 -- session each. Sections 5 and 6 drive toggle against a real server: it
 -- starts a stopped preview and stops a running one, a preview joined to
 -- another Neovim's included. Sections 7 to 10 start real previews too: a
--- buffer whose dotted filetype has a markdown part is served whole, as is
--- one setup's filetypes lists, beside markdown; setup refuses a filetypes
--- that is not a list of names with one error and changes nothing; and a
--- refresh reads the set setup built instead of building its own.
+-- buffer whose dotted filetype has a markdown part, first or last, is
+-- served whole, as is one setup's filetypes lists, beside markdown and in
+-- place of an earlier setup's list; setup refuses a filetypes that is not
+-- a list of names with one error and changes nothing; and a refresh reads
+-- the set setup built instead of building its own.
 --
 -- Run: nvim --headless -u NONE -l "$PWD/tests/command_test.lua"
 -- kitehost.nvim is found by tests/helpers.lua ($KITEHOST_RTP,
@@ -255,12 +256,17 @@ end
 H.case("Section 7: a filetype with a markdown part previews the buffer whole", function()
 	mp.setup({ open_browser = false, instance_mode = "multi", port = 0 })
 	H.defer(mp.stop)
-	buffer_of("literate.rzk", "rzk.markdown", "# literate\n\nprose and code\n")
-	local body, notes = started()
-	eq(body, "# literate\n\nprose and code", "rzk.markdown previews the buffer whole with no filetypes set")
-	eq(#notes, 0, "and its start makes no notice")
-	mp.stop()
-	for _, filetype in ipairs({ "rzk", "rzk.xmarkdown" }) do
+	local body, notes
+	-- The markdown part last, then first: a match on one end alone fails a row.
+	for _, filetype in ipairs({ "rzk.markdown", "markdown.pandoc" }) do
+		buffer_of("literate." .. filetype, filetype, "# literate\n\nprose and code\n")
+		body, notes = started()
+		eq(body, "# literate\n\nprose and code", filetype .. " previews the buffer whole with no filetypes set")
+		eq(#notes, 0, filetype .. "'s start makes no notice")
+		mp.stop()
+	end
+	-- A part that only begins or ends with the word is another filetype.
+	for _, filetype in ipairs({ "rzk", "rzk.xmarkdown", "markdownx" }) do
 		buffer_of("other." .. filetype, filetype, "# not markdown\n")
 		body, notes = started()
 		eq(body, nil, filetype .. " starts no preview of the buffer whole")
@@ -291,6 +297,12 @@ H.case("Section 8: filetypes previews more filetypes whole, beside markdown", fu
 		eq(#notes, 0, filetype .. "'s start makes no notice")
 		mp.stop()
 	end
+	-- A later setup's list replaces the earlier one, never adds to it.
+	mp.setup({ filetypes = { "rmd" } })
+	buffer_of("report.qmd", "quarto", "# quarto report\n")
+	body, notes = started()
+	eq(body, nil, 'quarto starts no preview of the buffer whole once filetypes = { "rmd" }')
+	ok(no_fence(notes), "quarto is searched for a mermaid fence again: " .. tostring(notes[1] and notes[1].msg))
 end)
 
 H.case("Section 9: setup refuses a filetypes that is not a list of filetype names", function()
