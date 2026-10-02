@@ -54,6 +54,8 @@ Open any Markdown file, then:
 
 > The first start opens your browser. Subsequent updates reuse the same tab.
 
+**A dotted filetype with a `markdown` part**, such as `rzk.markdown` for a literate file, previews whole as Markdown too, with no config: Neovim reads a dotted filetype as each of its parts in turn.
+
 **`.mmd` / `.mermaid` files** are fully supported: the entire file is rendered as a diagram.
 
 For **other non-markdown files**, place your cursor inside a fenced ```` ```mermaid ```` block: the plugin extracts and previews just that diagram.
@@ -273,7 +275,7 @@ Rendered preview (scroll preserved, no flicker)
 ```
 
 - **Rust renderer** (`mermaid_renderer = "rust"`): mermaid fences are pre-rendered to SVG via the `mmdr` CLI before writing to `content.md`. The browser receives ready-made SVGs with no mermaid.js overhead. Failed blocks fall back to browser-side rendering automatically.
-- **Markdown files**: The entire buffer is written to `content.md`
+- **Markdown files** (filetype `markdown`, or a dotted one with a `markdown` part): The entire buffer is written to `content.md`
 - **Mermaid files** (`.mmd`, `.mermaid`): The entire buffer is wrapped in a mermaid code fence
 - **Other files**: The mermaid block under the cursor is extracted (via Tree-sitter or regex fallback) and wrapped in a code fence
 - **SSE** (Server-Sent Events) from `kitehost.nvim` push updates instantly (no polling)

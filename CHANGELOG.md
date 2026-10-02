@@ -4,6 +4,10 @@ All notable changes to this project; versions follow SemVer. From `[Unreleased]`
 
 ## [Unreleased]
 
+### Added
+
+- A buffer whose filetype is dotted with a `markdown` part, such as `rzk.markdown` for a literate file, previews whole as Markdown with no config, since Neovim reads a dotted filetype as each of its parts in turn; before, only the filetype `markdown` did. Thanks @ddxtanx (#32).
+
 ## [2.0.0] - 2026-10-02
 
 ### Upgrading from markdown-preview.nvim

@@ -416,8 +416,20 @@ end
 -- Content writing (unified: markdown or mermaid)
 ---------------------------------------------------------------------------
 
+-- Neovim reads a dotted filetype as each of its parts in turn (rzk.markdown
+-- is rzk, then markdown), so a literate file whose filetype has a markdown
+-- part previews whole with no config.
+local function previews_whole(ft)
+	for part in ft:gmatch("[^.]+") do
+		if part == "markdown" then
+			return true
+		end
+	end
+	return false
+end
+
 ---Get the content to write based on filetype.
----Markdown buffers: entire buffer.
+---Markdown buffers (a markdown part counts): entire buffer.
 ---Mermaid files (.mmd, .mermaid): entire buffer wrapped in mermaid fence.
 ---Others: mermaid block under cursor wrapped in fence.
 ---@param bufnr integer
@@ -425,7 +437,7 @@ end
 local function get_content(bufnr)
 	local text
 	local ft = vim.bo[bufnr].filetype
-	if ft == "markdown" then
+	if previews_whole(ft) then
 		local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 		text = table.concat(lines, "\n")
 	elseif vim.api.nvim_buf_get_name(bufnr):match("%.mmd$") or vim.api.nvim_buf_get_name(bufnr):match("%.mermaid$") then
