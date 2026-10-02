@@ -301,7 +301,7 @@ H.case("Section 9: setup refuses a filetypes that is not a list of filetype name
 	end)
 	local list, set = mp.config.filetypes, mp._filetype_set
 	for _, case in ipairs({
-		-- ipairs reads a string as no names, so the preview would stay off unsaid.
+		-- ipairs raises on a string, so setup would end in a raw Lua error.
 		{ "a string", "quarto" },
 		{ "a table that is no list", { kind = "quarto" } },
 		{ "a list with a number in it", { "quarto", 3 } },

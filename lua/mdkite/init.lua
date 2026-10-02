@@ -148,9 +148,10 @@ M.config = {
 	},
 }
 
--- A string reads as no names to ipairs and a name that is not a string
--- matches no buffer, so either would leave a preview off with nothing
--- said; the empty name would match every buffer with no filetype.
+-- A string raises in ipairs, a table that is no list reads as no names and
+-- a name that is not a string matches no buffer, so the last two would
+-- leave a preview off with nothing said; the empty name would match every
+-- buffer with no filetype.
 local function is_filetype_list(value)
 	if type(value) ~= "table" or not vim.islist(value) then
 		return false
