@@ -1,0 +1,25 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.lua]
+indent_style = tab
+indent_size = 4
+
+[*.{yml,yaml,json,md}]
+indent_style = space
+indent_size = 2
+
+# Two trailing spaces are a Markdown hard line break.
+[*.md]
+trim_trailing_whitespace = false
+
+# assets/index.html, the one HTML file this plugin ships (kitehost.nvim
+# ships none, so its copy of this file has no such block).
+[*.html]
+indent_style = space
+indent_size = 4

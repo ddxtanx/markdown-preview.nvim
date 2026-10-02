@@ -1,0 +1,480 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  # edited is listed because the title and the body become the squash
+  # commit, so an edited pull request is judged again. No branch filter: it
+  # would drop every job, so a stacked pull request would get no CI at all.
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The kitehost floor the gating jobs and the windows job run against: the
+# first release under that name, whose kitehost module this plugin
+# requires, and the commit it named when pinned. A tag can be moved, so the
+# local action .github/actions/kitehost-floor checks out the commit, checks
+# that the tag still names it and that tests/helpers.lua's H.kitehost_floor
+# names the same tag; the floor moves by editing these two lines, that one
+# and KITEHOST_FLOOR in lua/mdkite/init.lua together (start_failure_test
+# reds when the last two part). kitehost main is the upstream job's to
+# report.
+env:
+  KITEHOST_FLOOR: v2.0.0
+  KITEHOST_FLOOR_SHA: 4cb5c94a84cc653e0b32e0c9aed95465a36fc94d
+  # The one bun pin, for the format and browser jobs.
+  BUN_VERSION: 1.4.2
+
+concurrency:
+  # A PR's superseded run is cancelled; a push and a manual run each get
+  # their own group, so no verdict on main is ever cancelled or replaced
+  # (GitHub replaces a pending run in a shared group even with
+  # cancel-in-progress false).
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, nvim ${{ matrix.nvim }}, kitehost floor)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        nvim: [stable]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # tests/helpers.lua looks for kitehost.nvim at ./kitehost-rtp.
+      # A local action runs from the commit under test, so it takes no SHA pin.
+      - uses: ./.github/actions/kitehost-floor
+        with:
+          tag: ${{ env.KITEHOST_FLOOR }}
+          sha: ${{ env.KITEHOST_FLOOR_SHA }}
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: ${{ matrix.nvim }}
+      - name: Version
+        run: nvim --version | head -n 3
+      # Release builds bundle the markdown parser since 0.10, so this asserts
+      # it instead of installing it; a -c Lua error alone would exit 0, so the
+      # pcall covers the vim.treesitter lookup as well as the call.
+      - name: Assert the markdown Tree-sitter parser
+        run: >-
+          nvim --headless -u NONE
+          -c 'lua local ok, p = pcall(function() return vim.treesitter.get_string_parser("# x", "markdown") end);
+          if not (ok and p) then io.stderr:write("markdown parser missing\n"); vim.cmd("cq 1") end'
+          -c 'qa!'
+      # -l exits 1 on a Lua error in the main chunk, where the luafile form the
+      # tests once documented exited 0; a failed assertion and an error raised
+      # in a callback reach the exit code through
+      # H.finish() (tests/helpers.lua).
+      - name: Headless tests
+        run: sh tests/run.sh
+      # One leg is enough for a POSIX sh script with no Neovim in it; it runs
+      # after a red suite too, as make test runs both.
+      - name: Commit-message policy test
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        run: sh tests/message_policy_test.sh
+
+  # The floor this plugin requires (the README states it from the floor
+  # commit on): the first 0.10 release, not its last patch.
+  floor:
+    name: floor (ubuntu-latest, nvim v0.10.0, kitehost floor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # tests/helpers.lua looks for kitehost.nvim at ./kitehost-rtp.
+      # Neovim 0.10.0 against the kitehost floor is the minimal install.
+      - uses: ./.github/actions/kitehost-floor
+        with:
+          tag: ${{ env.KITEHOST_FLOOR }}
+          sha: ${{ env.KITEHOST_FLOOR_SHA }}
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: v0.10.0
+      - name: Version
+        run: nvim --version | head -n 3
+      # Release builds bundle the markdown parser since 0.10, so this asserts
+      # it instead of installing it; a -c Lua error alone would exit 0, so the
+      # pcall covers the vim.treesitter lookup as well as the call.
+      - name: Assert the markdown Tree-sitter parser
+        run: >-
+          nvim --headless -u NONE
+          -c 'lua local ok, p = pcall(function() return vim.treesitter.get_string_parser("# x", "markdown") end);
+          if not (ok and p) then io.stderr:write("markdown parser missing\n"); vim.cmd("cq 1") end'
+          -c 'qa!'
+      - name: Headless tests
+        run: sh tests/run.sh
+
+  # Below the floor on a real Neovim: the suites need 0.10, and floor_guard
+  # mocks has() on a supported one, which passes a 0.10 API reached before a
+  # guard (measured), so a standalone smoke runs the refusal a 0.9 user meets,
+  # with the kitehost floor on the runtimepath as a user has it.
+  floor-below:
+    name: floor-below (ubuntu-latest, nvim v0.9.5, kitehost floor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # tests/floor_smoke.sh puts ./kitehost-rtp on the runtimepath.
+      - uses: ./.github/actions/kitehost-floor
+        with:
+          tag: ${{ env.KITEHOST_FLOOR }}
+          sha: ${{ env.KITEHOST_FLOOR_SHA }}
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: v0.9.5
+      - name: Version
+        run: nvim --version | head -n 3
+      - name: Below-floor smoke
+        run: sh tests/floor_smoke.sh
+
+  # A kitehost main change that is not this repo's regression must not red
+  # every PR, so main is reported here, outside ci-ok, on every push and PR.
+  upstream:
+    name: upstream (${{ matrix.os }}, kitehost main)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    # On push and pull_request runs the conclusion follows ci-ok; a red here
+    # is read from this job's own conclusion and never blocks a merge.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # tests/helpers.lua looks for kitehost.nvim at ./kitehost-rtp.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: selimacerbas/kitehost.nvim
+          ref: main
+          path: kitehost-rtp
+          persist-credentials: false
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: stable
+      - name: Version
+        run: nvim --version | head -n 3
+      - name: Headless tests
+        run: sh tests/run.sh
+      # The files shared with kitehost.nvim against its main, reported here
+      # outside ci-ok: a drift is a copy one side still owes the other.
+      - name: Shared-file parity with kitehost main
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        run: sh tests/parity.sh kitehost-rtp
+
+  # The suites on Windows, gating as the other test jobs do and on the
+  # kitehost floor as they are; it joined ci-ok after three green hosted
+  # runs. The token fallback (no /dev/urandom) has no assertion of its own.
+  windows:
+    name: windows (nvim stable, kitehost floor)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # tests/helpers.lua looks for kitehost.nvim at ./kitehost-rtp.
+      - uses: ./.github/actions/kitehost-floor
+        with:
+          tag: ${{ env.KITEHOST_FLOOR }}
+          sha: ${{ env.KITEHOST_FLOOR_SHA }}
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: stable
+      - name: Version
+        run: nvim --version | head -n 3
+      - name: Headless tests
+        run: sh tests/run.sh
+
+  lint-workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Full history: make lint-blame checks that HEAD contains every commit
+      # .git-blame-ignore-revs names.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: actionlint
+        # Dependabot skips docker:// references (dependabot-core's
+        # github_actions file_parser returns early on them), so this digest
+        # is moved by hand.
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
+        with:
+          args: -color
+      # The target holds the list of scripts; the binary is the shellcheck
+      # the actionlint image carries (0.11.0, measured), run by the same
+      # digest, which moves with the one above.
+      - name: make shellcheck
+        run: make shellcheck SHELLCHECK="docker run --rm -v $GITHUB_WORKSPACE:/w:ro -w /w --entrypoint shellcheck rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667"
+      # actionlint reads a composite action's call, never its steps, so a step
+      # made conditional (an if: on an input no caller passes) or allowed to
+      # fail would silence the floor check of five gating jobs. yq reads the
+      # steps as YAML, so a quoted key or a flow mapping cannot pass it.
+      - name: Composite action steps run unconditionally
+        run: |
+          set -euo pipefail
+          dir=.github/actions
+          [ -d "$dir" ] || { echo "::error::no $dir directory to judge"; exit 2; }
+          seen=0
+          fail=0
+          while IFS= read -r -d '' f; do
+            seen=$((seen + 1))
+            if ! n=$(yq -r '[.runs.steps[] | select(has("if") or has("continue-on-error"))] | length' "$f"); then
+              echo "::error::$f could not be read as YAML"
+              exit 2
+            fi
+            if [ "$n" != 0 ]; then
+              echo "::error::$f: $n step(s) carry an if: or a continue-on-error:"
+              fail=1
+            fi
+          done < <(find "$dir" -type f \( -name action.yml -o -name action.yaml \) -print0)
+          [ "$seen" -gt 0 ] || { echo "::error::no composite action found under $dir"; exit 2; }
+          exit "$fail"
+      - name: make lint-text
+        run: make lint-text
+      - name: make lint-blame
+        run: make lint-blame
+
+  # The Makefile holds the one StyLua pin; the job runs its target. The
+  # checkout holds the job token for the clone and persists no credential;
+  # setup-bun gets none, since an exact bun-version needs no API lookup.
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          token: ""
+      - name: make fmt-check
+        run: make fmt-check
+
+  # The pull request arm judges a contributor's commits, title and body before
+  # they land; the push arm reports what already landed on main, a direct push
+  # and the merge or squash commit GitHub composes included. A push range it
+  # cannot read is noticed, never judged. A manual run judges the commit it
+  # runs on, alone. A pull request GitHub's Dependabot
+  # opened (keyed on the login GitHub sets, never on a commit's author name,
+  # which anyone can write) is machine-authored: its sign-off line is
+  # accepted on its commits and its body, release notes, is not judged; the
+  # maintainer replaces that body when merging (CONTRIBUTING.md).
+  commits:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The squash setting makes the title the subject, with " (#N)" appended,
+      # and the body the commit body, so the title is at most 65 characters
+      # and both are judged as the message they become.
+      - name: Pull request title and body
+        if: github.event_name == 'pull_request'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          # ${#TITLE} counts characters, not bytes, only under a UTF-8 locale.
+          LC_ALL: C.UTF-8
+        run: |
+          set -euo pipefail
+          fail=0
+          if [ "${#TITLE}" -gt 65 ]; then
+            printf '::error::the title is %s characters, over 65: %s\n' "${#TITLE}" "$TITLE"
+            fail=1
+          fi
+          if [ "$AUTHOR" = 'dependabot[bot]' ]; then
+            echo "::notice::a Dependabot pull request: the title is judged, the body is not"
+            BODY=
+          fi
+          if out=$(printf '%s\n\n%s\n' "$TITLE" "$BODY" | .githooks/message-policy - 2>&1); then
+            rc=0
+          else
+            rc=$?
+          fi
+          case $rc in
+            0) ;;
+            1)
+              printf '%s\n' "$out" | sed 's/^/::error::the title or the body (see CONTRIBUTING.md): /'
+              fail=1
+              ;;
+            *)
+              printf '::error::the message policy could not judge the title and the body (exit %s): %s\n' "$rc" "$out"
+              exit 2
+              ;;
+          esac
+          exit "$fail"
+      - name: The message policy on each commit
+        if: ${{ !cancelled() }}
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          # An empty sed script passes every line; Dependabot's one drops
+          # its own sign-off line, exactly as it writes it, and nothing else.
+          drop=
+          if [ "$AUTHOR" = 'dependabot[bot]' ]; then
+            echo "::notice::a Dependabot pull request: its sign-off line is accepted on each commit"
+            drop='/^Signed-off-by: dependabot\[bot\] <support@github\.com>$/d'
+          fi
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo "::notice::a manual run names no range; the commit it runs on is judged alone"
+            range="$GITHUB_SHA^!"
+          elif [ "$EVENT" = pull_request ]; then
+            # The test merge's first parent is the base GitHub merged into;
+            # pull_request.base.sha goes stale once the branch merges main.
+            range="$(git rev-parse "$GITHUB_SHA^1")..$PR_HEAD"
+          else
+            # Empty or all zeros is a push with no earlier tip; a tip missing
+            # from the clone was dropped by a force push.
+            case $BEFORE in
+              *[!0]*) ;;
+              *)
+                echo "::notice::no earlier tip on this push; nothing judged"
+                exit 0
+                ;;
+            esac
+            if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              echo "::notice::the earlier tip $BEFORE is not in the clone; nothing judged"
+              exit 0
+            fi
+            if ! base=$(git merge-base "$BEFORE" "$GITHUB_SHA"); then
+              echo "::notice::$BEFORE and $GITHUB_SHA share no history; nothing judged"
+              exit 0
+            fi
+            range="$base..$GITHUB_SHA"
+          fi
+          count=$(git rev-list --count "$range")
+          if [ "$count" -eq 0 ]; then
+            if [ "$EVENT" = pull_request ]; then
+              echo "::error::the pull request range $range holds no commit"
+              exit 1
+            fi
+            # A rewind or a re-push of the same tip lands no new commit.
+            echo "::notice::no new commit in $range; nothing judged"
+            exit 0
+          fi
+          echo "judging $count commits in $range"
+          shas=$(git rev-list --reverse "$range")
+          fail=0
+          for sha in $shas; do
+            if out=$(git show -s --format=%B "$sha" | sed "$drop" | .githooks/message-policy - 2>&1); then
+              continue
+            else
+              rc=$?
+            fi
+            name=$(git show -s --format='%h %s' "$sha")
+            if [ "$rc" -ne 1 ]; then
+              printf '::error::%s: the message policy could not judge it (exit %s): %s\n' "$name" "$rc" "$out"
+              exit 2
+            fi
+            printf '%s\n' "$out" | while IFS= read -r line; do
+              printf '::error::%s (see CONTRIBUTING.md): %s\n' "$name" "$line"
+            done
+            fail=1
+          done
+          exit "$fail"
+
+  # The page itself: tests/browser/smoke.test.ts renders a buffer in a
+  # headless Chromium and follows one edit over SSE. The CDN libraries the
+  # page loads need network, and a failed request is named in the output.
+  browser:
+    name: browser (ubuntu-latest, nvim stable, chromium, kitehost floor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The smoke test looks for kitehost.nvim at ./kitehost-rtp.
+      - uses: ./.github/actions/kitehost-floor
+        with:
+          tag: ${{ env.KITEHOST_FLOOR }}
+          sha: ${{ env.KITEHOST_FLOOR_SHA }}
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: stable
+      - name: Version
+        run: nvim --version | head -n 3
+      # The job token stays out of this third-party action: an exact version needs none.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          token: ""
+      # Without the lock, --frozen-lockfile resolves from the registry, and
+      # the Chromium install runs after it so bun x resolves the pinned
+      # Playwright, not npm's latest. The headless test launches the
+      # headless shell only.
+      - name: Install and Chromium
+        working-directory: tests/browser
+        run: |
+          test -f bun.lock || { echo "::error::tests/browser/bun.lock is missing"; exit 1; }
+          bun install --frozen-lockfile
+          bun x playwright install --with-deps --only-shell chromium
+      # The target is the gate's definition, a local run's too: it reads the
+      # JUnit report's counts, since bun exits 0 when every test is skipped.
+      - name: Smoke test
+        run: make test-browser
+
+  # The one status check branch protection requires, strict, on both
+  # repositories. Its context is this job's id, so renaming the job or giving
+  # it a name: leaves every pull request waiting on a check that never
+  # reports. Each gating job is named, so an empty or shortened needs list
+  # cannot pass. Each check line ends in exit 1: under bash -e a failed test
+  # inside an && list does not stop the script, so a later line that passed
+  # would pass a red run (measured). commits runs on every event, so a manual
+  # run of a pull request's head posts no green ci-ok that judged no commit.
+  ci-ok:
+    if: always()
+    needs: [test, floor, floor-below, windows, lint-workflows, format, commits, browser]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every gating job succeeded
+        env:
+          EVENT: ${{ github.event_name }}
+          TEST: ${{ needs.test.result }}
+          FLOOR: ${{ needs.floor.result }}
+          FLOOR_BELOW: ${{ needs.floor-below.result }}
+          WINDOWS: ${{ needs.windows.result }}
+          LINT: ${{ needs.lint-workflows.result }}
+          FORMAT: ${{ needs.format.result }}
+          COMMITS: ${{ needs.commits.result }}
+          BROWSER: ${{ needs.browser.result }}
+        run: |
+          echo "event=$EVENT test=$TEST floor=$FLOOR floor-below=$FLOOR_BELOW windows=$WINDOWS lint-workflows=$LINT format=$FORMAT commits=$COMMITS browser=$BROWSER"
+          [ "$COMMITS" = success ] || exit 1
+          [ "$TEST" = success ] && [ "$FLOOR" = success ] && [ "$FLOOR_BELOW" = success ] && [ "$WINDOWS" = success ] && [ "$LINT" = success ] && [ "$FORMAT" = success ] && [ "$BROWSER" = success ] || exit 1

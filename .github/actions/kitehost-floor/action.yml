@@ -1,0 +1,48 @@
+name: kitehost floor
+description: >-
+  Check out the kitehost.nvim floor at ./kitehost-rtp by its pinned
+  commit, and check that the floor tag still names that commit and that
+  tests/helpers.lua's H.kitehost_floor names the same tag.
+
+inputs:
+  tag:
+    description: The kitehost floor tag (the workflow's KITEHOST_FLOOR).
+    required: true
+  sha:
+    description: The commit the tag named when pinned (KITEHOST_FLOOR_SHA).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # tests/helpers.lua and the smoke test look for kitehost.nvim at
+    # ./kitehost-rtp.
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: selimacerbas/kitehost.nvim
+        ref: ${{ inputs.sha }}
+        path: kitehost-rtp
+        persist-credentials: false
+    # A moved tag is the supply-chain event this step surfaces: the checkout
+    # took the pinned commit, and the tag must still name it. The helper
+    # assigns the floor once, as a whole line naming the same tag, so a bump
+    # that edits one place reds even with the old line left in a comment, and
+    # a second assignment in either spelling, even on the same line, which
+    # Lua would read last, reds too.
+    - name: kitehost floor is the pinned tag
+      shell: bash
+      env:
+        KITEHOST_FLOOR: ${{ inputs.tag }}
+        KITEHOST_FLOOR_SHA: ${{ inputs.sha }}
+      run: |
+        n=$({ grep -oE "H(\.kitehost_floor|\[[\"']kitehost_floor[\"']\])[[:space:]]*=([^=]|\$)" tests/helpers.lua || true; } | wc -l | tr -d ' ')
+        if [ "$n" != 1 ] || ! grep -qxF "H.kitehost_floor = \"$KITEHOST_FLOOR\"" tests/helpers.lua; then
+          echo "::error::tests/helpers.lua must assign H.kitehost_floor once, to \"$KITEHOST_FLOOR\" (assignments: $n)"
+          exit 1
+        fi
+        git -C kitehost-rtp fetch --depth 1 origin "refs/tags/$KITEHOST_FLOOR:refs/tags/$KITEHOST_FLOOR"
+        tagged=$(git -C kitehost-rtp rev-parse "$KITEHOST_FLOOR^{commit}")
+        if [ "$tagged" != "$KITEHOST_FLOOR_SHA" ]; then
+          echo "::error::kitehost $KITEHOST_FLOOR names $tagged, not the pinned $KITEHOST_FLOOR_SHA"
+          exit 1
+        fi

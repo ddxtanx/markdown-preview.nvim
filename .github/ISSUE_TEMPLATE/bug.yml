@@ -1,0 +1,46 @@
+name: Bug report
+description: Something renders wrong, does not start, or breaks on your setup
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, what you expected.
+    validations:
+      required: true
+  - type: input
+    id: nvim
+    attributes:
+      label: Neovim version
+      description: The first line of `nvim --version`.
+      placeholder: NVIM v0.11.5
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: macOS 15.6, Ubuntu 24.04, Windows 11 with WSL2
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Plugin versions
+      description: mdkite.nvim and kitehost.nvim, from `git -C <plugin dir> describe --tags` or your lock file.
+      placeholder: mdkite.nvim v2.0.0, kitehost.nvim v2.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Minimal config
+      description: The smallest `setup({...})` and plugin spec that reproduces it. This plugin makes a fresh token per session; replace a fixed `token` in a kitehost.nvim `setup` you paste with `<redacted>`.
+      render: lua
+  - type: textarea
+    id: health
+    attributes:
+      label: Diagnostics
+      description: The output of `:messages` after the failure. A failed browser launch prints the preview URL, which carries the token on any bind but `127.0.0.1` (the default, and what `localhost` binds), so replace a `?t=<token>` query with `?t=<redacted>`.
+      render: text

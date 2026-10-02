@@ -1,0 +1,1156 @@
+-- tests/helpers.lua
+-- Shared by every headless suite: XDG isolation for everything a suite
+-- creates, one spelling per path, a bounded curl, one pass/fail ledger
+-- whose exit code is the ruling, a teardown that runs whatever a suite
+-- registers, a raw TCP client, a reader of raw responses and counters of
+-- descriptors and live handles. Loaded by path (dofile), never by require,
+-- so nothing under tests/ joins the plugin's public module tree.
+local uv = vim.uv
+local H = {}
+
+local passed, failed, skipped = 0, 0, 0
+-- nil until H.finish() rules, then "pass" or "fail".
+local verdict
+-- Set once H.finish() starts its drain, so a quit a cleanup or a callback
+-- runs from there is named as the drain's, and H.defer refuses a cleanup
+-- that would never run.
+local finishing = false
+-- The guard every ledger entry point runs, defined with the ledger below;
+-- the raw client, which comes first, runs it too.
+local open_ledger
+local errors = {}
+local tests_dir = vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))
+
+-- os.exit as Neovim provides it, taken before the wrapper at the end of this
+-- file replaces it: a ruling that must end the run calls it directly.
+local real_exit = os.exit
+
+local is_win = vim.fn.has("win32") == 1
+
+-- Whether the filesystem folds case is the volume's property, not the
+-- platform's: NTFS and macOS's default APFS fold, the usual Linux
+-- filesystems do not. It is measured once, where every fixture a suite
+-- builds lives: a fresh directory under Neovim's tempdir, a name made in one
+-- case and looked up in the other. It stays nil when Neovim has no tempdir.
+do
+	local dir = vim.fn.tempname()
+	if dir ~= "" and uv.fs_mkdir(dir, 448) then
+		if uv.fs_mkdir(dir .. "/probe-case", 448) then
+			H.fs_folds_case = uv.fs_stat(dir .. "/PROBE-CASE") ~= nil
+		end
+		vim.fn.delete(dir, "rf")
+	end
+end
+
+-- A nil or empty name raises at the suite's line (level 3: past this check
+-- and the helper that called it), where :p would read it as a file named
+-- v:null or as the working directory and a comparison would pass by accident.
+local function require_path(fn, path)
+	if type(path) ~= "string" or path == "" then
+		error(("%s: a path is a non-empty string, not %s"):format(fn, vim.inspect(path)), 3)
+	end
+end
+
+-- The name the filesystem gives a path, or nil for a name that is not there
+-- (ENOENT) or sits under a file (ENOTDIR). Any other error comes back as the
+-- second value, which H.canon raises at its caller's line rather than
+-- compare as some other file: a file that exists and cannot be resolved (a
+-- symlink loop, a refused search), or a name the platform's realpath calls
+-- too long (ENAMETOOLONG). That errno is the platform's, not this walk's:
+-- macOS's realpath refuses a spelling over PATH_MAX, glibc's resolves one
+-- (both measured on the hosted runners); a component over NAME_MAX cannot
+-- exist, and past a missing directory it is looked up as a missing name, so
+-- it reads as a path until that directory is made.
+local function realpath(name)
+	local real, err, kind = uv.fs_realpath(name)
+	if real then
+		return vim.fs.normalize(real, { expand_env = false })
+	end
+	if kind ~= "ENOENT" and kind ~= "ENOTDIR" then
+		return nil, err
+	end
+end
+
+-- One spelling per file, so a suite compares names by value and a message
+-- prints the name a test builds: absolute (:p, a leading ~ expanded), then
+-- the name the filesystem gives (it folds a symlink, /var against
+-- /private/var on macOS and an 8.3 short name such as RUNNER~1, which
+-- tempname() returns on Windows), with forward slashes, no trailing one and
+-- a $ kept literal. Only a missing name is folded by name, since nothing on
+-- disk answers for it; a .. after a symlinked directory climbs from its
+-- target as the kernel reads it: realpath needs the path to exist, so the
+-- :p form resolves through its deepest existing ancestor, and the missing
+-- tail is walked one component at a time, a name that exists going through
+-- realpath, a . skipped and a .. leaving the directory resolved so far,
+-- which after a missing name is that name's parent (the missing name is
+-- popped by name). So a path reads the same before and after a missing name
+-- in it is made, a .. that climbs out of one onto a link included, and a
+-- second pass changes nothing. A link is the exception: a dangling one
+-- reads as a missing name, so making its target, or making a missing name
+-- as a link, moves a path through it to the target. Where the filesystem
+-- folds case, a missing name moves to the case it is made in, which
+-- H.same_path folds away. Returns the name, or nil and the error H.canon
+-- and H.same_path raise at their caller's line.
+local function canon(path)
+	local full = vim.fn.fnamemodify(path, ":p")
+	if is_win then
+		full = full:gsub("\\", "/")
+	end
+	local head, tail = full, {}
+	while true do
+		local real, err = realpath(head)
+		if err then
+			return nil, "H.canon: " .. tostring(err)
+		end
+		if real then
+			head = real
+			break
+		end
+		local parent = vim.fs.dirname(head)
+		if parent == head then
+			-- :p leaves a relative name relative when the working directory
+			-- is gone (measured), and the walk up then ends at ".", where the
+			-- spelling would compare as some other file.
+			if head == "." then
+				local cwd, cwd_err = uv.cwd()
+				return nil,
+					("H.canon: %s has no absolute name: the working directory %s"):format(
+						path,
+						cwd and (cwd .. " does not resolve") or ("is gone (" .. tostring(cwd_err) .. ")")
+					)
+			end
+			return vim.fs.normalize(full, { expand_env = false })
+		end
+		local name = vim.fs.basename(head)
+		if name ~= "" then
+			table.insert(tail, 1, name)
+		end
+		head = parent
+	end
+	for _, name in ipairs(tail) do
+		if name == ".." then
+			head = vim.fs.dirname(head)
+		elseif name ~= "." then
+			-- Only a root ends in a separator, which must not double into a
+			-- UNC-looking //.
+			local joined = head .. (head:sub(-1) == "/" and "" or "/") .. name
+			local real, err = realpath(joined)
+			if err then
+				return nil, "H.canon: " .. tostring(err)
+			end
+			head = real or joined
+		end
+	end
+	return head
+end
+
+function H.canon(path)
+	require_path("H.canon", path)
+	local name, err = canon(path)
+	if err then
+		error(err, 2)
+	end
+	return name
+end
+
+-- Whether two names denote one file. A missing name has no on-disk case for
+-- realpath to give, so the comparison folds case where the filesystem does
+-- (H.fs_folds_case), and refuses to answer where that was not measured. A
+-- name H.canon cannot resolve raises H.canon's error at this caller's line.
+function H.same_path(a, b)
+	require_path("H.same_path", a)
+	require_path("H.same_path", b)
+	if H.fs_folds_case == nil then
+		error("H.same_path: the filesystem's case fold was not measured (Neovim has no tempdir)", 2)
+	end
+	local err_a, err_b
+	a, err_a = canon(a)
+	b, err_b = canon(b)
+	if err_a or err_b then
+		error(err_a or err_b, 2)
+	end
+	if H.fs_folds_case then
+		return a:lower() == b:lower()
+	end
+	return a == b
+end
+
+-- The repository root is the parent of tests/, whatever the current
+-- directory. H.root is canonical, and tests build plugin paths and compare
+-- names from it; root_entry names the same directory by the name the helper
+-- was loaded through, as given, which is what the runtimepath gets: a
+-- plain-named link to a directory whose real name carries a comma or a $
+-- loads through its own name, where the physical one would be split or
+-- expanded. That holds for an absolute load name only: :p makes a relative
+-- one absolute against the physical working directory, which has no link
+-- in it (measured), so tests/run.sh passes each suite by its absolute
+-- logical name.
+local root_entry = vim.fs.normalize(vim.fn.fnamemodify(tests_dir, ":p:h:h"), { expand_env = false })
+H.root = H.canon(root_entry)
+
+-- A fresh XDG tree per run: stdpath() reads the variables at call time
+-- (measured on 0.12.5), so cache, data and state move for everything created
+-- after this call. The startup log is opened, and the runtimepath built from
+-- the config and data dirs, before any script runs; a runner that must
+-- isolate those sets the XDG variables in the environment (tests/run.sh
+-- does). The check turns a Neovim that cached the paths at startup into a
+-- loud failure instead of writes into the real tree.
+function H.isolate()
+	local root = vim.fn.tempname()
+	vim.fn.mkdir(root, "p")
+	vim.env.XDG_CACHE_HOME = root .. "/cache"
+	vim.env.XDG_DATA_HOME = root .. "/data"
+	vim.env.XDG_STATE_HOME = root .. "/state"
+	for _, kind in ipairs({ "cache", "data", "state" }) do
+		if vim.fn.stdpath(kind):find(root, 1, true) ~= 1 then
+			error(
+				("H.isolate: stdpath('%s') did not follow XDG_%s_HOME: %s"):format(
+					kind,
+					kind:upper(),
+					vim.fn.stdpath(kind)
+				)
+			)
+		end
+	end
+	return root
+end
+
+-- The two files a module can be, in the order Neovim's loader tries them.
+local function module_forms(modname)
+	local rel = modname:gsub("%.", "/")
+	return { "/lua/" .. rel .. ".lua", "/lua/" .. rel .. "/init.lua" }
+end
+
+-- The file require would load for modname, found the way the loader finds
+-- it: runtimepath entries in order, and in each lua/<mod>.lua before
+-- lua/<mod>/init.lua, so a flat file in an earlier entry wins (measured).
+-- The entries are the search path Neovim built, after it split, expanded
+-- and globbed the option (with backslashes on Windows), so the file comes
+-- back canonical. Building that list can itself raise (a brace group with a
+-- comma: E220, measured), so the error comes back as the second value for
+-- the proof to name.
+local function first_hit(modname)
+	local listed, entries = pcall(vim.api.nvim_list_runtime_paths)
+	if not listed then
+		return nil, "the runtimepath raised " .. tostring(entries)
+	end
+	for _, entry in ipairs(entries) do
+		for _, form in ipairs(module_forms(modname)) do
+			if uv.fs_stat(entry .. form) then
+				return H.canon(entry .. form)
+			end
+		end
+	end
+end
+
+-- The runtimepath reads an entry at search time: a comma splits it, a $VAR
+-- expands, a glob character matches, a backslash escapes, a brace group
+-- expands and a last component named after makes an after-directory, and an
+-- earlier entry answers first, so the directory a suite prepends is not
+-- always the one require loads from and a copy on the startup packpath
+-- answers instead (measured). Returns nil when modname resolves to root's
+-- own file, else the refusal naming what require would load (or what the
+-- search raised), which H.rtp raises at the suite's line. Every caller passes
+-- a canonical root (H.root, or the directory H.rtp made canonical), so the
+-- refusal names it as given.
+local function unproven(root, modname, label, reason)
+	local own
+	for _, form in ipairs(module_forms(modname)) do
+		if uv.fs_stat(root .. form) then
+			own = root .. form
+			break
+		end
+	end
+	local hit, raised = first_hit(modname)
+	if own and hit and H.same_path(hit, own) then
+		return nil
+	end
+	return ("%s at %s does not resolve: %s (%s)"):format(label, root, raised or tostring(hit), reason)
+end
+
+-- The reason a refusal gives when the directory holds the module and the
+-- search still answers elsewhere.
+local RTP_SYNTAX =
+	"a name the runtimepath reads differently (a comma, a dollar sign, a glob character, a backslash, a brace, or a name ending in after)"
+
+-- parity: own lines begin (tests/parity.sh compares the rest with the sibling)
+-- The kitehost floor this plugin's release notes promise, written once:
+-- the not-found message and the suites read it here, and CI's floor step
+-- checks this line against the workflow's KITEHOST_FLOOR.
+H.kitehost_floor = "v2.0.0"
+
+-- The checkout goes first on the runtimepath, by the name the helper was
+-- loaded through, and proves it is the copy require loads.
+-- kitehost.nvim's copy of this file is one source with this one outside
+-- these own lines, indentation aside: here H.rtp proves this plugin's
+-- modules and then finds kitehost as a dependency, from $KITEHOST_RTP
+-- (else $LIVE_SERVER_RTP, its name before 2.0.0, through 2.x),
+-- ./kitehost-rtp (the CI checkout) or the checkout's sibling
+-- kitehost.nvim, then live-server.nvim, its name before 2.0.0 (the
+-- developer's clone); the first that exists wins, goes on the runtimepath
+-- by the name it was found under, and is written on a line of its own and
+-- returned canonical, so a stale ./kitehost-rtp shows in every run and a
+-- test compares the name by value. A set override that is not a directory
+-- raises, and so does finding none or a directory whose modules the
+-- search does not resolve to: falling through would let require load
+-- whatever kitehost the startup runtimepath or packpath carries. Every
+-- raise names the suite's H.rtp() line.
+function H.rtp()
+	vim.opt.runtimepath:prepend(root_entry)
+	-- Every module the checkout ships, since a copy elsewhere can shadow any
+	-- one of them; vim.fs.dir does not glob, where glob() would read a glob
+	-- character in H.root (it does expand an environment variable in the
+	-- path, and the runtimepath expands it the same way, so that root fails
+	-- the proof below either way). A name with a dot before .lua is no module
+	-- require can name (the dot reads as a directory): git mergetool leaves
+	-- util.BASE.12345.lua during a conflict, which as a module failed the
+	-- proof and so every suite, for a reason that named no conflict.
+	local modules = { "mdkite" }
+	for name, kind in vim.fs.dir(H.root .. "/lua/mdkite") do
+		local base = name:match("^([%w_]+)%.lua$")
+		if kind == "file" and base and base ~= "init" then
+			table.insert(modules, "mdkite." .. base)
+		end
+	end
+	-- Through 2.x the module's name before the rename is a flat file that
+	-- hands back mdkite's table, and a copy elsewhere would answer for it
+	-- just as well; a tree without the file ships nothing under that name.
+	if uv.fs_stat(H.root .. "/lua/markdown_preview.lua") then
+		table.insert(modules, "markdown_preview")
+	end
+	-- The first refusal among this plugin's modules, or nil.
+	local function root_refusal(reason)
+		for _, modname in ipairs(modules) do
+			local refusal = unproven(H.root, modname, "the checkout", reason)
+			if refusal then
+				return refusal
+			end
+		end
+	end
+	local refusal = root_refusal(RTP_SYNTAX)
+	if refusal then
+		error(refusal, 2)
+	end
+	-- Built one by one: a nil first element would end ipairs before the
+	-- fallbacks, so an unset override would find nothing.
+	local candidates = {}
+	-- KITEHOST_RTP, else LIVE_SERVER_RTP, its name before 2.0.0, through
+	-- 2.x; the first one set is the one read.
+	for _, var in ipairs({ "KITEHOST_RTP", "LIVE_SERVER_RTP" }) do
+		local path = vim.env[var]
+		if path and path ~= "" then
+			if vim.fn.isdirectory(path) == 0 then
+				-- The value as set: it names the variable, not a path this
+				-- run resolved.
+				error(var .. " is set but is not a directory: " .. path, 2)
+			end
+			table.insert(candidates, path)
+			break
+		end
+	end
+	local ci_checkout = H.root .. "/kitehost-rtp"
+	-- H.root is physical, so through a symlinked checkout its parent is the
+	-- link target's, the one the kernel resolves ".." to, where the link's
+	-- own parent is the one normalize would give. The sibling is tried by
+	-- its name, then by its name before 2.0.0.
+	local sibling = vim.fs.dirname(H.root) .. "/kitehost.nvim"
+	local former_sibling = vim.fs.dirname(H.root) .. "/live-server.nvim"
+	table.insert(candidates, ci_checkout)
+	table.insert(candidates, sibling)
+	table.insert(candidates, former_sibling)
+	for _, found in ipairs(candidates) do
+		if vim.fn.isdirectory(found) == 1 then
+			-- The entry is the name found, absolute so a relative override
+			-- does not follow a later directory change, and a $ in it kept
+			-- literal as the directory check read it: a plain-named link to
+			-- a directory whose real name carries a comma loads. The name
+			-- every proof, print and return uses is canonical, so a ..
+			-- resolves through the filesystem (measured).
+			local entry = vim.fs.normalize(vim.fn.fnamemodify(found, ":p"), { expand_env = false })
+			local dir = H.canon(found)
+			vim.opt.runtimepath:prepend(entry)
+			-- The modules the plugin loads, as the pinned floor ships them: server,
+			-- and util, which server requires. A module a newer kitehost
+			-- requires beside them joins the list with the floor bump.
+			for _, modname in ipairs({ "kitehost.server", "kitehost.util" }) do
+				refusal = unproven(
+					dir,
+					modname,
+					"kitehost.nvim",
+					"a directory without lua/kitehost/server.lua and util.lua, or " .. RTP_SYNTAX
+				)
+				if refusal then
+					error(refusal, 2)
+				end
+			end
+			-- The prepend puts the entry before the checkout, so a directory
+			-- that also carries this plugin's modules, in either file form,
+			-- answered require instead while every proof above passed
+			-- (measured): prove the root again.
+			refusal = root_refusal(("kitehost.nvim at %s carries this plugin's modules too"):format(dir))
+			if refusal then
+				error(refusal, 2)
+			end
+			-- Its own line, straight to stdout: a parent reads it back.
+			H.write_line("kitehost.nvim: " .. dir)
+			return dir
+		end
+	end
+	error(
+		("kitehost.nvim not found: clone https://github.com/selimacerbas/kitehost.nvim (%s or newer) to %s or %s, or set KITEHOST_RTP to a checkout"):format(
+			H.kitehost_floor,
+			ci_checkout,
+			sibling
+		),
+		2
+	)
+end
+-- parity: own lines end
+
+function H.tmpdir()
+	local dir = vim.fn.tempname()
+	vim.fn.mkdir(dir, "p")
+	return dir
+end
+
+function H.write_file(path, data)
+	local fd = assert(uv.fs_open(path, "w", 420))
+	assert(uv.fs_write(fd, data, 0))
+	assert(uv.fs_close(fd))
+end
+
+-- A finished vim.system process's exit read the shell's way: a process killed
+-- by a signal reports code 0 with the signal set (measured), which would read
+-- as a clean exit, so it is 128 + the signal; a nonzero code wins, so
+-- vim.system's own timeout stays 124.
+function H.exit_code(result)
+	return result.code ~= 0 and result.code or (result.signal ~= 0 and 128 + result.signal or 0)
+end
+
+-- Synchronous GET through curl, hermetic and bounded. -q (curl honours it
+-- only as the first argument) skips every curlrc, -g stops brace and bracket
+-- globbing, --path-as-is sends dot segments as written so the server, not
+-- curl, resolves them, and --noproxy keeps a developer's http_proxy off
+-- loopback. The bound turns a firewall that swallows SYNs or a peer that never
+-- answers into a failed assertion instead of a hung suite; vim.system's
+-- timeout is a second bound should curl's own fail (it reports exit 124).
+-- status is 0 whenever curl itself reports failure (refused, timed out, a body
+-- shorter than its Content-Length: curl exit 18) and curl_exit carries curl's
+-- code; a peer that sends a status line and closes is a 200 with an empty body
+-- by curl's rules, so a test that needs the body asserts on it. vim.system
+-- returns the body byte for byte, where vim.fn.system mapped NUL to SOH, and
+-- a SIGINT during its wait ends the suite, where vim.fn.system left a Neovim
+-- that ignored INT and TERM (measured on 0.12.5). curl_exit is curl's exit
+-- as H.exit_code reads it, so a curl killed by a signal is 128 + the signal
+-- and the timeout's own code (124) wins over the signal it sends. The first
+-- hosted Windows run read a refused port as a timeout (curl 28) under a
+-- connect bound of 2, which fits Windows retrying a refused loopback connect
+-- for about two seconds before it reports it; the bound now sits above that
+-- window and below --max-time, and the hosted Windows runs since read a
+-- refused port as curl 7 (measured).
+function H.http_get(url, headers)
+	local cmd = {
+		"curl",
+		"-q",
+		"-g",
+		"--path-as-is",
+		"--noproxy",
+		"*",
+		"-s",
+		"--max-time",
+		"5",
+		"--connect-timeout",
+		"4",
+		"-o",
+		"-",
+		"-w",
+		"\nHTTPSTATUS:%{http_code}",
+	}
+	for _, h in ipairs(headers or {}) do
+		table.insert(cmd, "-H")
+		table.insert(cmd, h)
+	end
+	table.insert(cmd, url)
+	local result = vim.system(cmd, { text = false, timeout = 8000 }):wait()
+	local curl_exit = H.exit_code(result)
+	local body, status = (result.stdout or ""):match("^(.*)\nHTTPSTATUS:(%d+)%s*$")
+	if curl_exit ~= 0 then
+		return { status = 0, body = body or "", curl_exit = curl_exit }
+	end
+	return { status = tonumber(status) or 0, body = body or "", curl_exit = 0 }
+end
+
+-- A raw TCP client for the requests curl cannot send: a request line split
+-- across writes, a NUL byte, a half-close, an abort, an event stream read
+-- with a bound. Every luv call's nil, err is read, never hidden in a pcall
+-- around a closure, and every wait has its own bound. The connect bound
+-- sits above Windows's two-second retry of a refused loopback connect (the
+-- H.http_get comment's measurement). The port and host are checked before
+-- any handle exists, a refusal at the suite's line: luv truncates a
+-- fraction or an out-of-range port onto another port, and raises on a host
+-- name, where an IP literal returns nil, err.
+local Raw = {}
+Raw.__index = Raw
+local RAW_CONNECT_MS, RAW_STEP_MS = 5000, 2000
+
+function H.raw_connect(port, host)
+	open_ledger("H.raw_connect")
+	-- Its deferred close would be refused once the drain has begun, so the
+	-- refusal comes before any handle exists.
+	if finishing then
+		error("H.raw_connect during a cleanup drain: connect before H.finish()", 2)
+	end
+	if type(port) ~= "number" or port ~= math.floor(port) or port < 1 or port > 65535 then
+		error("H.raw_connect: port must be an integer from 1 to 65535, got " .. tostring(port), 2)
+	end
+	-- An IPv6 literal carries colons.
+	if
+		host ~= nil
+		and not (type(host) == "string" and (host:match("^%d+%.%d+%.%d+%.%d+$") or host:find(":", 1, true)))
+	then
+		error("H.raw_connect: host must be an IP literal, got " .. tostring(host), 2)
+	end
+	local tcp, terr = uv.new_tcp()
+	if not tcp then
+		return nil, terr
+	end
+	local done, conn_err = false, nil
+	local req, err = tcp:connect(host or "127.0.0.1", port, function(e)
+		conn_err, done = e, true
+	end)
+	if not req then
+		tcp:close()
+		return nil, err
+	end
+	if not vim.wait(RAW_CONNECT_MS, function()
+		return done
+	end, 5) then
+		tcp:close()
+		return nil, "connect timed out"
+	end
+	if conn_err then
+		tcp:close()
+		return nil, conn_err
+	end
+	local c = setmetatable({ tcp = tcp, chunks = {}, eof = false }, Raw)
+	local reading, rerr = tcp:read_start(function(e, chunk)
+		if chunk then
+			table.insert(c.chunks, chunk)
+		else
+			c.eof, c.err = true, e
+		end
+	end)
+	if not reading then
+		tcp:close()
+		return nil, rerr
+	end
+	H.defer(function()
+		c:close()
+	end)
+	return c
+end
+
+-- Writes bytes and waits for libuv to take them. A peer that closes early
+-- fails the send with EPIPE; a row that expects a refusal reads that error,
+-- never a reply.
+function Raw:send(bytes)
+	local done, werr = false, nil
+	local req, err = self.tcp:write(bytes, function(e)
+		werr, done = e, true
+	end)
+	if not req then
+		return nil, err
+	end
+	if not vim.wait(RAW_STEP_MS, function()
+		return done
+	end, 5) then
+		return nil, "write timed out"
+	end
+	if werr then
+		return nil, werr
+	end
+	return true
+end
+
+-- Ends the write side (a FIN) and keeps reading.
+function Raw:half_close()
+	local done, serr = false, nil
+	local req, err = self.tcp:shutdown(function(e)
+		serr, done = e, true
+	end)
+	if not req then
+		return nil, err
+	end
+	if not vim.wait(RAW_STEP_MS, function()
+		return done
+	end, 5) then
+		return nil, "shutdown timed out"
+	end
+	if serr then
+		return nil, serr
+	end
+	return true
+end
+
+-- An RST where a test needs a reset. A closing handle has none to send, so
+-- it answers nil and says so, never true for a reset that did not go out.
+function Raw:abort()
+	if self.tcp:is_closing() then
+		return nil, "already closing"
+	end
+	local r, err = self.tcp:close_reset()
+	if not r then
+		return nil, err
+	end
+	return true
+end
+
+function Raw:close()
+	if not self.tcp:is_closing() then
+		self.tcp:close()
+	end
+end
+
+-- The bytes received so far, after waiting up to ms for the peer's end or
+-- for stop_when(bytes) to hold; eof says whether the peer ended. self.err
+-- tells a reset from a FIN: ECONNRESET after a reset, nil after a FIN.
+function Raw:read(ms, stop_when)
+	local function bytes()
+		return table.concat(self.chunks)
+	end
+	vim.wait(ms, function()
+		return self.eof or (stop_when ~= nil and stop_when(bytes()))
+	end, 5)
+	return bytes(), self.eof
+end
+
+-- One request on a fresh connection, read until the server closes it: the
+-- bytes, whether the peer ended, and the read's error, nil after a FIN and
+-- ECONNRESET after a reset.
+function H.raw_request(port, bytes, ms)
+	local c, err = H.raw_connect(port)
+	if not c then
+		return nil, err
+	end
+	local sent, serr = c:send(bytes)
+	if not sent then
+		c:close()
+		return nil, serr
+	end
+	local data, eof = c:read(ms or 3000)
+	c:close()
+	return data, eof, c.err
+end
+
+-- Whether a head's lines split as header lines: each ends in CRLF, never a
+-- bare CR or LF, and each after the status line carries a colon.
+local function head_splits(head)
+	if head:gsub("\r\n", ""):find("[\r\n]") then
+		return false
+	end
+	for line in head:gmatch("\r\n([^\r\n]+)") do
+		if not line:find(":", 1, true) then
+			return false
+		end
+	end
+	return true
+end
+
+-- Splits raw bytes into HTTP/1.1 responses. A body runs for its
+-- Content-Length, or to the end of the bytes when there is none (an event
+-- stream), so a status line spliced into a streamed body shows as a body
+-- that differs from the file, never as a second response; a 1xx, 204 or 304
+-- has none (RFC 9112 6.3). complete says whether a body holds its whole
+-- Content-Length. Bytes that do not parse, a head with a bare CR or LF or a
+-- header line without a colon among them, stop the split: the responses
+-- read so far come back with the unparsed tail as a second value, "" when
+-- everything parsed, so a row that asserts a header is absent reads through
+-- H.response.
+function H.responses(data)
+	local list, pos = {}, 1
+	while pos <= #data do
+		local head_end = data:find("\r\n\r\n", pos, true)
+		if not head_end then
+			break
+		end
+		local head = data:sub(pos, head_end - 1)
+		local code, rest = head:match("^HTTP/1%.1 (%d%d%d)([^\r\n]*)")
+		if not code or (rest ~= "" and rest:sub(1, 1) ~= " ") or not head_splits(head) then
+			break
+		end
+		local reason = rest:sub(2)
+		local r = { status = tonumber(code), reason = reason, headers = {}, count = {} }
+		for name, value in head:gmatch("\r\n([^:\r\n]+):[ \t]*([^\r\n]*)") do
+			name = name:lower()
+			-- Trailing blanks go through one greedy match: an anchored gsub
+			-- rescans a run of blanks from every start and turns quadratic.
+			value = value:match("^(.*[^ \t])") or ""
+			r.count[name] = (r.count[name] or 0) + 1
+			r.headers[name] = r.headers[name] or value
+		end
+		local body_start = head_end + 4
+		-- A negative length moves pos backwards and loops forever; hex or a
+		-- fraction reads a length the server never writes, so digits only.
+		local len = tonumber((r.headers["content-length"] or ""):match("^%d+$"))
+		if (r.status >= 100 and r.status < 200) or r.status == 204 or r.status == 304 then
+			r.body, r.complete = "", true
+			pos = body_start
+		elseif len then
+			r.body = data:sub(body_start, body_start + len - 1)
+			r.complete = #r.body == len
+			pos = body_start + len
+		else
+			r.body = data:sub(body_start)
+			r.complete = true
+			pos = #data + 1
+		end
+		table.insert(list, r)
+	end
+	return list, data:sub(pos)
+end
+
+-- The first response of the bytes, or a raise: a row that asserts a header
+-- is absent must fail when nothing parsed, never pass on an empty list.
+function H.response(data)
+	local r = H.responses(data)[1]
+	if not r then
+		error("H.response: no response parsed from " .. vim.inspect(data:sub(1, 80)), 2)
+	end
+	return r
+end
+
+-- Open descriptors of this process: /proc/self/fd on Linux, /dev/fd on
+-- macOS (20 raw connections add 40, a client and an accepted socket each,
+-- and their closes give them back, measured on macOS). A leak the ledger
+-- cannot see shows here. nil on Windows, which has neither; a listing that
+-- fails elsewhere raises, so a leak row never skips by accident. dir is for
+-- the rows: a missing directory proves the raise.
+function H.fd_count(dir)
+	if is_win then
+		return nil
+	end
+	dir = dir or (uv.fs_stat("/proc/self/fd") and "/proc/self/fd" or "/dev/fd")
+	local handle, err = uv.fs_scandir(dir)
+	if not handle then
+		error("H.fd_count: " .. tostring(err), 2)
+	end
+	local n = 0
+	while uv.fs_scandir_next(handle) do
+		n = n + 1
+	end
+	return n
+end
+
+-- Handles counted by creation, never by uv.walk: the walk segfaults every
+-- Neovim 0.10.x, the floor, and on 0.12 it visits luv's handles alone. A
+-- handle stays in the table until a count finds it closing, never weakly:
+-- LuaJIT keeps a finalized handle's weak key for one more collection, and
+-- is_closing() on it segfaults (measured on 0.10.0 and 0.12.5).
+local handles = {}
+local HANDLE_KINDS = { "tcp", "timer", "fs_event", "pipe", "udp", "fs_poll" }
+-- Every 64th registration drops the closed handles, so a suite that never
+-- counts does not hold every handle it made until it exits.
+local registered = 0
+local function prune()
+	for h in pairs(handles) do
+		if h:is_closing() then
+			handles[h] = nil
+		end
+	end
+end
+for _, kind in ipairs(HANDLE_KINDS) do
+	local make = uv["new_" .. kind]
+	if make then
+		uv["new_" .. kind] = function(...)
+			local h, err = make(...)
+			if h then
+				handles[h] = kind
+				registered = registered + 1
+				if registered % 64 == 0 then
+					prune()
+				end
+			end
+			return h, err
+		end
+	end
+end
+
+-- Live handles of one kind created since the harness loaded: "tcp",
+-- "timer", "fs_event", "pipe", "udp", "fs_poll". A kind outside that list
+-- raises, so a leak row with a misspelt kind never counts zero on both
+-- sides and passes. A handle stays counted until close() marks it closing,
+-- and a peer's close runs in a later callback, so a baseline is taken
+-- after H.wait_for settles the previous case's sockets.
+function H.handle_count(kind)
+	if not vim.tbl_contains(HANDLE_KINDS, kind) then
+		error("H.handle_count: unknown kind " .. tostring(kind), 2)
+	end
+	prune()
+	local n = 0
+	for _, k in pairs(handles) do
+		if k == kind then
+			n = n + 1
+		end
+	end
+	return n
+end
+
+-- The registry's entries, open or not yet pruned: the rows' window onto
+-- its pruning, never a count a suite should rule on.
+function H._registry_size()
+	local n = 0
+	for _ in pairs(handles) do
+		n = n + 1
+	end
+	return n
+end
+
+-- Waits up to ms for pred() to hold; whether it did.
+function H.wait_for(pred, ms)
+	return vim.wait(ms, pred, 5) == true
+end
+
+-- An error raised in a libuv or vim.schedule callback, where every server
+-- handler runs, prints a traceback and leaves the exit code at 0; v:errmsg is
+-- the one trace of it a script can read, and it holds only the latest
+-- message, so every ledger call samples it. The :messages history cannot stand
+-- in: every print() enters it and it keeps 500 lines on 0.12.5, 200 on 0.10.0,
+-- so a long suite evicts an early error (measured). Any error message fails
+-- the suite, an error notification too; a suite that provokes one on purpose
+-- goes through H.expect_error, which consumes only the message it expects.
+local function sample_errmsg()
+	if vim.v.errmsg ~= "" then
+		table.insert(errors, vim.v.errmsg)
+		vim.v.errmsg = ""
+	end
+end
+
+-- The first lines of an error message, without the traceback stderr already
+-- carries.
+local function headline(e)
+	return (e:gsub("\nstack traceback:.*", ""):gsub("\n", " "))
+end
+
+-- An error a callback raised while the suite blocked (in vim.fn.system, say)
+-- waits in the event queue and reaches v:errmsg only when the loop runs again
+-- (measured on 0.10.0 and 0.12.5), so H.errors and H.expect_error drain the
+-- loop before they read it.
+local function drain()
+	vim.wait(10, function()
+		return false
+	end)
+end
+
+-- Every error message Neovim reported since the helper loaded.
+function H.errors()
+	drain()
+	sample_errmsg()
+	return vim.list_extend({}, errors)
+end
+
+-- Runs fn, which should report an error message containing pattern (plain
+-- text), and consumes that one message. Errors already pending go to the
+-- ledger first, and the loop is drained after fn so a message reported through
+-- a callback is seen; a message that does not match stays for the ledger.
+-- v:errmsg holds one message: when more than one error is reported while fn
+-- runs (its own or a callback's), only the last is compared and the others
+-- are lost, so fn reports one error and a suite expecting several calls
+-- H.expect_error once per error.
+function H.expect_error(pattern, fn)
+	H.errors()
+	fn()
+	drain()
+	if vim.v.errmsg ~= "" and vim.v.errmsg:find(pattern, 1, true) then
+		vim.v.errmsg = ""
+		return true
+	end
+	return false
+end
+
+-- An assertion after the ruling would never reach the exit code.
+open_ledger = function(caller)
+	if verdict then
+		error(caller .. " after H.finish(): the ruling is already out", 3)
+	end
+	sample_errmsg()
+end
+
+-- Output written before the process ends without Neovim's own teardown.
+local function flush()
+	io.stdout:flush()
+	io.stderr:flush()
+end
+
+-- real_exit skips Neovim's teardown, which removes its per-process tempdir
+-- and H.isolate's XDG tree inside it (one left per unfinished red child on
+-- 0.10 and 0.12, measured). The dir is resolved once, at load, and kept only
+-- when absolute and present: tempname() returns "" when Neovim has no
+-- tempdir, and the parent of "" is ".", which delete(.., "rf") would empty.
+local tempdir
+do
+	local name = vim.fn.tempname()
+	local dir = name ~= "" and vim.fn.fnamemodify(name, ":h") or ""
+	local absolute = dir:sub(1, 1) == "/" or dir:match("^%a:[/\\]") ~= nil
+	if absolute and vim.fn.isdirectory(dir) == 1 then
+		tempdir = dir
+	end
+end
+local function cleanup()
+	if tempdir then
+		vim.fn.delete(tempdir, "rf")
+	end
+end
+
+-- Every exit the helper makes itself: output flushed, the tempdir removed.
+local function exit_now(code, ...)
+	flush()
+	cleanup()
+	return real_exit(code, ...)
+end
+
+-- On 0.12.5 a message that fills a multiple of the screen width loses its
+-- newline to the next one, and a headless Neovim is 80 columns wide, so an
+-- 80- or 160-column print fused with the ledger line after it (measured).
+-- The width is set to the most Neovim takes (10000; a larger value is
+-- clamped to it, measured on 0.10.0 and 0.12.5), so a message of a
+-- realistic width keeps its newline.
+vim.o.columns = 10000
+
+-- Every line the helper writes goes here, straight to stdout with its own
+-- newline, never through print: print writes to stderr under -l and ends a
+-- line only when the next message begins, so text written after it landed
+-- on its line (0.10.0 and 0.12.5); cq and os.exit skip the newline a normal
+-- exit writes, which glued the next line of output (a CI ::endgroup::
+-- marker) onto it; at 80 columns on 0.12.5 the width of a message or a temp
+-- path decided whether a ledger line began a line; print on 0.10.0 ends a
+-- line in \r\n and cut a long message short under textlock (all measured).
+-- A message a suite caused may still hold its line open on stderr, which the
+-- runner merges into one stream: an empty echo ends that line and writes
+-- nothing when none is open (measured on both), so consecutive ledger lines
+-- take no empty line between them. It cannot see an open message that fills
+-- a multiple of the width (10000 columns, above) on 0.12.5, and a fast
+-- event may not echo. The flush stops a C library that buffers a piped
+-- stdout from moving these lines behind stderr.
+function H.write_line(line)
+	if not vim.in_fast_event() then
+		pcall(vim.api.nvim_echo, { { "" } }, false, {})
+	end
+	io.stdout:write(line .. "\n")
+	io.stdout:flush()
+end
+
+function H.section(title)
+	if passed + failed + skipped > 0 then
+		H.write_line("")
+	end
+	H.write_line(title)
+end
+
+function H.ok(cond, msg)
+	open_ledger("H.ok")
+	if cond then
+		passed = passed + 1
+		H.write_line("  PASS: " .. msg)
+	else
+		failed = failed + 1
+		H.write_line("  FAIL: " .. msg)
+	end
+end
+
+function H.eq(a, b, msg)
+	open_ledger("H.eq")
+	if a == b then
+		passed = passed + 1
+		H.write_line("  PASS: " .. msg)
+	else
+		failed = failed + 1
+		H.write_line(string.format("  FAIL: %s (got %s, want %s)", msg, tostring(a), tostring(b)))
+	end
+end
+
+-- A skip drops an assertion, so it is counted and written, never silent.
+function H.skip(msg)
+	open_ledger("H.skip")
+	skipped = skipped + 1
+	H.write_line("  SKIP: " .. msg)
+end
+
+-- Cleanups a suite registers: stop a server, close a client. H.case runs
+-- the ones registered inside it when it ends, raise or not, and H.finish
+-- runs whatever is left before it rules, so a failed or raising section
+-- never leaves a listener or a socket for the next one to count.
+local deferred = {}
+local function run_deferred(mark)
+	while #deferred > mark do
+		local ok, err = pcall(table.remove(deferred))
+		if not ok then
+			failed = failed + 1
+			H.write_line("  FAIL: a cleanup raised: " .. headline(tostring(err)))
+		end
+	end
+end
+
+function H.defer(fn)
+	open_ledger("H.defer")
+	-- The drain in H.finish empties the list once and rules, so a cleanup
+	-- registered from then on would never run.
+	if finishing then
+		error("H.defer during a cleanup drain: the list is being emptied", 2)
+	end
+	if type(fn) ~= "function" then
+		error("H.defer: a function is required", 2)
+	end
+	table.insert(deferred, fn)
+end
+
+-- A section whose body runs under xpcall: a raise is one FAIL naming the
+-- section, the sections after it still run, and its cleanups run either
+-- way. A raise after the ruling escapes, so it fails the run as an
+-- assertion after H.finish() does outside a case.
+function H.case(title, fn)
+	open_ledger("H.case")
+	H.section(title)
+	local mark = #deferred
+	local ok, err = xpcall(fn, debug.traceback)
+	if not ok then
+		if verdict then
+			error(err, 0)
+		end
+		failed = failed + 1
+		H.write_line("  FAIL: " .. title .. " raised: " .. headline(tostring(err)))
+	end
+	run_deferred(mark)
+end
+
+-- The exit code is the ruling every gate reads; the summary is for the reader.
+-- A suite that asserted nothing proved nothing, so it fails as well, and so
+-- does one whose callbacks raised, and one whose skips exceed a quarter of
+-- its passes: a leg that turns rows into skips must not stay green, and the
+-- worst ratio measured is 16 skips to 91 passes (the hosted Windows
+-- helpers_test) and 2 to 9 (host_binding behind a Mac's firewall). The
+-- Results line a runner greps for follows the banner, a line of the
+-- helper's own, so it always starts a line.
+-- cq ends the run through Neovim's own teardown; where Ex commands are refused
+-- (textlock, an expr mapping: E565) it raised and the run went on to exit 0
+-- (measured), so a cq that raises or returns falls through to the real exit.
+function H.finish()
+	open_ledger("H.finish")
+	finishing = true
+	run_deferred(0)
+	for _, e in ipairs(H.errors()) do
+		failed = failed + 1
+		H.write_line("  FAIL: error reported: " .. headline(e))
+	end
+	if passed + failed == 0 then
+		H.write_line("No assertion ran: a suite that checks nothing is not a pass.")
+	end
+	if passed > 0 and skipped * 4 > passed then
+		failed = failed + 1
+		H.write_line(("  FAIL: %d skipped against %d passed, over a quarter of the passes"):format(skipped, passed))
+	end
+	H.write_line("")
+	H.write_line("========================================")
+	H.write_line(string.format("Results: %d passed, %d failed, %d skipped", passed, failed, skipped))
+	H.write_line("========================================")
+	verdict = (failed > 0 or passed == 0) and "fail" or "pass"
+	if verdict == "fail" then
+		local ok, err = pcall(vim.cmd, "cq 1")
+		if not ok then
+			H.write_line("cq refused: " .. headline(tostring(err)))
+		end
+		exit_now(1)
+	end
+end
+
+-- A suite that returns early or never calls H.finish() would exit 0 whatever
+-- it asserted, and after a passing ruling an error a callback raised on the
+-- way out still fails the run. A failing ruling fails the exit too, whichever
+-- path ends the process. Returns true, with the reason said, when the run
+-- must exit 1.
+local function exit_must_fail()
+	if verdict == "fail" then
+		return true
+	end
+	if not verdict then
+		-- The drain inside H.finish() serves a callback chain until it stops,
+		-- so a quit from one ends the run before the ruling prints (measured).
+		H.write_line(
+			finishing and "a quit ran inside H.finish()'s drain; the suite's own ruling never printed"
+				or "suite ended without H.finish()"
+		)
+		return true
+	end
+	local late = H.errors()
+	if #late > 0 then
+		H.write_line("error reported after H.finish(): " .. headline(late[#late]))
+		return true
+	end
+	return false
+end
+
+-- Set once a ruling fails the run, so a later exit path neither prints the
+-- reason again nor rules it away.
+local exit_failed = false
+
+-- The ruling fails closed: an error raised inside it rules exit 1 as well,
+-- where in VimLeavePre it left the exit code at 0 (measured).
+local function exit_must_fail_closed()
+	if exit_failed then
+		return true
+	end
+	local ok, must_fail = pcall(exit_must_fail)
+	if not ok then
+		H.write_line("exit ruling raised: " .. tostring(must_fail))
+		must_fail = true
+	end
+	exit_failed = must_fail
+	return must_fail
+end
+
+-- cq in VimLeavePre let a quit still pending (a vim.schedule callback running
+-- qa! or cq 0 while Neovim tears down) set the exit code after it, so a red
+-- suite exited 0 (measured on 0.10.0 and 0.12.5); the ruling ends the process
+-- itself unless the exit under way already carries 1. On 0.13 os.exit is
+-- Neovim's own exit, which fires this event and runs pending callbacks first,
+-- so the autocmd is nested: a quit such a callback runs fires it again and is
+-- ruled like any other (measured on nightly v0.13.0-dev).
+vim.api.nvim_create_autocmd("VimLeavePre", {
+	group = vim.api.nvim_create_augroup("tests_helpers_finish", { clear = true }),
+	nested = true,
+	callback = function()
+		if exit_must_fail_closed() and vim.v.exiting ~= 1 then
+			exit_now(1)
+		end
+	end,
+})
+
+-- os.exit leaves without VimLeavePre on 0.10 and 0.12, so a suite that called
+-- it after a failed assertion exited 0 with no ruling (measured); it takes the
+-- same ruling on the way out. A fast event (a libuv callback) can neither
+-- drain the loop nor print, 0.13 refuses os.exit there (E5560), and an error
+-- raised just before it went unseen (measured), so from a fast event the call
+-- only schedules the ruling and returns: the run ends at the next turn of the
+-- loop with the code the ruling gives, and the caller's code after os.exit
+-- runs until then.
+local exit_scheduled = false
+os.exit = function(code, ...)
+	if vim.in_fast_event() then
+		if not exit_scheduled then
+			exit_scheduled = true
+			local close = ...
+			vim.schedule(function()
+				if exit_must_fail_closed() then
+					return exit_now(1)
+				end
+				return exit_now(code, close)
+			end)
+		end
+		return
+	end
+	if exit_must_fail_closed() then
+		return exit_now(1, ...)
+	end
+	return exit_now(code, ...)
+end
+
+return H
