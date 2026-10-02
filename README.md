@@ -190,7 +190,7 @@ require("mdkite").setup({
 })
 ```
 
-The list adds to `markdown` and never replaces it. A value that is not a list of filetype names (a bare string, a number in the list, an empty name) is refused by `setup()` with one error notice, and that call changes nothing. A `.mmd` or `.mermaid` file still previews as one diagram, and any other buffer the mermaid block under the cursor.
+The list adds to `markdown` and never replaces it. A value that is not a list of filetype names (a bare string, a number in the list, an empty name) is refused by `setup()` with one error notice, and that call changes nothing. A `.mmd` or `.mermaid` file needs no entry: it previews as one diagram. Naming `mermaid` in `filetypes` would preview such a buffer whole as Markdown, so its diagram shows as text. Any other buffer previews the mermaid block under the cursor.
 
 ### Hooks
 
