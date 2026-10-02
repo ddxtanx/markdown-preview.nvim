@@ -1440,7 +1440,9 @@ H.case("Section 16: a write's temporary file is never served", function()
 end)
 calls.start, calls.stop = 0, 0
 
--- The plugin leaves a temporary at any depth to the dot rule.
+-- kitehost's dot rule answers first, at any depth; where serve_dotfiles
+-- is on, the plugin's own protected entry holds a temporary behind the
+-- token (16c).
 H.case("Section 16b: a temporary in a subfolder is never served", function()
 	mp.setup({ port = free_port() })
 	H.defer(function()
@@ -1460,6 +1462,42 @@ H.case("Section 16b: a temporary in a subfolder is never served", function()
 	local path = ("http://127.0.0.1:%d/sub/.content.md.4242.tmp"):format(port)
 	eq(H.http_get(path).status, 404, "a subfolder's temporary answers 404 without the token")
 	eq(H.http_get(path .. "?t=" .. token).status, 404, "and with the token")
+end)
+
+-- The dot rule answers 404 before the token gate, so only a server that
+-- serves dot files shows the plugin's own entry for its temporaries.
+H.case("Section 16c: where dot files are served, a temporary stays behind the token", function()
+	local real_start = server.start
+	stub("start", function(cfg)
+		cfg.serve_dotfiles = true
+		return real_start(cfg)
+	end)
+	mp.setup({ port = free_port() })
+	H.defer(function()
+		mp.setup({ port = 18421 })
+	end)
+	vim.cmd("buffer " .. first_buf)
+	mp.start()
+	H.defer(mp.stop)
+	local ws = mp._workspace_dir
+	vim.fn.mkdir(vim.fs.joinpath(ws, "sub"), "p")
+	H.write_file(vim.fs.joinpath(ws, ".content.md.4242.tmp"), "# held")
+	H.write_file(vim.fs.joinpath(ws, "sub", ".content.md.4242.tmp"), "# held")
+	H.defer(function()
+		vim.fn.delete(vim.fs.joinpath(ws, ".content.md.4242.tmp"))
+		vim.fn.delete(vim.fs.joinpath(ws, "sub"), "rf")
+	end)
+	local port, token = mp._server_instance and mp._server_instance.port or 0, mp._token or ""
+	for _, at in ipairs({ "", "sub/" }) do
+		local path = ("http://127.0.0.1:%d/%s.content.md.4242.tmp"):format(port, at)
+		local where = at == "" and "the root" or "a subfolder"
+		eq(H.http_get(path).status, 401, ("a temporary in %s answers 401 without the token"):format(where))
+		eq(
+			H.http_get(path .. "?t=" .. token).status,
+			200,
+			("and %s's is served with it, so the token is what refused it"):format(where)
+		)
+	end
 end)
 
 H.case("Section 17b: a failed rename and a dangling link", function()
@@ -1593,10 +1631,9 @@ H.case("Section 17: a write keeps what its target was", function()
 end)
 calls.start, calls.stop = 0, 0
 
--- On Windows a path vim.fs.joinpath builds ends in slashes, so a folder
--- cut on the backslash alone was the wrong one or none, and a write made
--- no missing parent. dirname is write_text's own local, reached as its
--- upvalue so the module's surface stays as it is.
+-- Either separator ends a folder (util.lua's dirname says why). dirname
+-- is util.lua's local, reached as write_text's upvalue so the module's
+-- surface stays as it is.
 H.case("Section 17c: a write makes a missing folder, whichever separator names it", function()
 	local util = require("mdkite.util")
 	local dirname
